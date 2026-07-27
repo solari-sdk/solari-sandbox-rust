@@ -1,11 +1,12 @@
 [package]
-name = "solari-sdk"
+name = "solari-sandbox"
 version = "0.1.1"
 repository = "https://github.com/solari-sdk/solari-sandbox-rust"
 edition = "2021"
 rust-version = "1.75"
 description = "Rust binding for the Solari sandbox SDK (core surface: commands, files, code.run, git)."
-license = "Apache-2.0"
+license = "MIT"
+readme = "README.md"
 
 [lib]
 name = "solari"
