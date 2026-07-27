@@ -1,0 +1,26 @@
+[package]
+name = "solari-sdk"
+version = "0.1.1"
+repository = "https://github.com/solari-sdk/solari-sandbox-rust"
+edition = "2021"
+rust-version = "1.75"
+description = "Rust binding for the Solari sandbox SDK (core surface: commands, files, code.run, git)."
+license = "Apache-2.0"
+
+[lib]
+name = "solari"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+futures-util = "0.3"
+url = "2"
+base64 = "0.22"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
