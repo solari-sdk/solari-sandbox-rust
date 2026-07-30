@@ -1,6 +1,6 @@
 [package]
 name = "solari-sandbox"
-version = "0.1.1"
+version = "0.1.2"
 repository = "https://github.com/solari-sdk/solari-sandbox-rust"
 edition = "2021"
 rust-version = "1.75"
