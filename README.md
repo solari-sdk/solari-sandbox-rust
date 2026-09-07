@@ -3,7 +3,7 @@
 Rust binding for the Solari sandbox SDK — the **core surface**: create / connect /
 kill a sandbox, then drive it via `commands`, `files`, `code.run`, and a
 client-side `git` namespace. It speaks the exact same wire protocol as the
-reference `@solarisdk/core` TypeScript package (see `sdk/PROTOCOL.md`).
+reference `@solarisdk/core` TypeScript package (see [`PROTOCOL.md`](PROTOCOL.md)).
 
 - **REST** to the gateway for session lifecycle + the one-shot `/exec` fast path.
 - **Control WebSocket** (newline-delimited JSON-RPC) for everything a live
