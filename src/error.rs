@@ -10,6 +10,11 @@ use crate::types::GatewayErrorBody;
 /// the TypeScript reference (AuthError / PlanError / ConcurrencyLimitError /
 /// NoCapacityError / GatewayError / ActionError / TimeoutError / ConnectionError).
 #[derive(Debug, thiserror::Error)]
+// Non-exhaustive so a future variant is a non-breaking addition for downstream
+// crates that match on this type. It does NOT constrain matches inside this
+// crate (Rust only enforces the wildcard arm on out-of-crate matches), so keep
+// it: its whole purpose is to make the next variant free rather than breaking.
+#[non_exhaustive]
 pub enum SolariError {
     /// HTTP 401/403 — the API key was missing, malformed, or rejected.
     #[error("{message}")]
@@ -50,6 +55,11 @@ pub enum SolariError {
     /// Anything else (bad response body, internal invariant).
     #[error("{0}")]
     Other(String),
+    /// A caller passed an invalid argument (e.g. a blank session id). Distinct
+    /// from `Other`: this is the caller's input to fix, not an unexpected
+    /// server response.
+    #[error("{message}")]
+    Validation { message: String },
 }
 
 impl SolariError {

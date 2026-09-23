@@ -16,6 +16,25 @@ pub struct Lifecycle {
     pub on_timeout: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_resume: Option<bool>,
+    /// Auto-park (deschedule) the guest after this many milliseconds with no
+    /// activity. Parking freezes vCPUs but keeps the slot, ports and control
+    /// channel resident, so the next request wakes it in milliseconds. Floored
+    /// by the gateway and capped at the session's idle window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub park_after_ms: Option<u64>,
+    /// Bounded park: the most a session may stay parked before the gateway
+    /// wakes it unconditionally, even with no incoming traffic. Floored at the
+    /// gateway's park floor and capped at the idle window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub park_max_ms: Option<u64>,
+    /// Escalate a session parked this long to a full hibernate (durable
+    /// checkpoint, slot freed) rather than staying frozen indefinitely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hibernate_after_parked_ms: Option<u64>,
+    /// Take a live durable checkpoint at most this often while the session
+    /// runs. Floored server-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint_every_ms: Option<u64>,
 }
 
 /// One attach-at-create instruction: a persistent volume and the absolute
@@ -50,8 +69,19 @@ pub struct CreateSandboxRequest {
     pub metadata: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Legacy, gateway-side FALLBACK idle window in seconds, only used when
+    /// `timeout_ms` is unset — prefer `timeout_ms`. Kept for parity with the
+    /// reference SDKs, which have always accepted it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_snapshot: Option<String>,
+    /// VM isolation tier: `"shared"` (sandbox-only), `"dedicated"` (default)
+    /// or `"hardened"` (own VM, no outbound network — verified 2026-09-23 on
+    /// staging, not yet on prod; refused with 409 `HostCapabilityMissing`
+    /// where a host doesn't advertise it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isolation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<Lifecycle>,
     /// Initial display resolution, e.g. `"1280x720"`. Desktops only.

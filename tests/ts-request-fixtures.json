@@ -27,10 +27,16 @@
           "proj": "alpha"
         },
         "timeoutMs": 600000,
+        "ttlSeconds": 3600,
         "fromSnapshot": "snap_seed",
+        "isolation": "dedicated",
         "lifecycle": {
           "onTimeout": "pause",
-          "autoResume": true
+          "autoResume": true,
+          "parkAfterMs": 30000,
+          "parkMaxMs": 20000,
+          "hibernateAfterParkedMs": 90000,
+          "checkpointEveryMs": 300000
         },
         "volumes": [
           {
@@ -56,10 +62,16 @@
           "proj": "alpha"
         },
         "timeoutMs": 600000,
+        "ttlSeconds": 3600,
         "fromSnapshot": "snap_seed",
+        "isolation": "hardened",
         "lifecycle": {
           "onTimeout": "pause",
-          "autoResume": true
+          "autoResume": true,
+          "parkAfterMs": 30000,
+          "parkMaxMs": 20000,
+          "hibernateAfterParkedMs": 90000,
+          "checkpointEveryMs": 300000
         },
         "resolution": "1280x720",
         "record": true,

@@ -48,7 +48,13 @@ pub struct CreateOptions {
     pub envs: Option<HashMap<String, String>>,
     pub metadata: Option<HashMap<String, String>>,
     pub timeout_ms: Option<u64>,
+    /// Legacy, gateway-side FALLBACK idle window in seconds, only used when
+    /// `timeout_ms` is unset — prefer `timeout_ms`.
+    pub ttl_seconds: Option<u64>,
     pub from_snapshot: Option<String>,
+    /// VM isolation tier: `"shared"` (sandbox-only), `"dedicated"` (default)
+    /// or `"hardened"` (own VM, no outbound network). See `types::CreateSandboxRequest::isolation`.
+    pub isolation: Option<String>,
     pub lifecycle: Option<Lifecycle>,
     /// Initial display resolution, e.g. `"1280x720"`. Desktops only — a headless
     /// sandbox has no display.
@@ -76,7 +82,9 @@ impl CreateOptions {
             envs: self.envs,
             metadata: self.metadata,
             timeout_ms: self.timeout_ms,
+            ttl_seconds: self.ttl_seconds,
             from_snapshot: self.from_snapshot,
+            isolation: self.isolation,
             lifecycle: self.lifecycle,
             resolution: self.resolution,
             record: self.record,
@@ -135,11 +143,18 @@ impl Client {
             .http
             .request("POST", "/sandboxes", Some(body), Some(new_idempotency_key()))
             .await?;
-        Ok(Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms))
+        Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)
     }
 
     /// Re-attach to a running sandbox by id (`GET /sandboxes/:id`).
     pub async fn connect(&self, sandbox_id: &str) -> Result<Sandbox, SolariError> {
+        // Guard B: the caller supplied this id, so a blank one is their input to
+        // fix -> Validation (distinct from the response-side Other above).
+        if sandbox_id.trim().is_empty() {
+            return Err(SolariError::Validation {
+                message: "Solari: connect() requires a non-blank sandbox id.".to_string(),
+            });
+        }
         let view = self.get(sandbox_id).await?;
         let control_url = view.control_url.clone().unwrap_or_else(|| {
             format!(
@@ -168,7 +183,7 @@ impl Client {
             expires_at: view.expires_at,
             stream_url,
         };
-        Ok(Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms))
+        Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)
     }
 
     /// Fetch a sandbox's current view (`GET /sandboxes/:id`).
@@ -255,13 +270,23 @@ impl Sandbox {
         http: Arc<HttpTransport>,
         resp: CreateSandboxResponse,
         call_timeout_ms: Option<u64>,
-    ) -> Self {
+    ) -> Result<Self, SolariError> {
+        // A blank id in the response builds a nearly-right "/sandboxes//exec"
+        // (double slash), not an obviously wrong path, so it slips through while
+        // every call the handle makes is malformed. A blank id in a RESPONSE is
+        // a bad reply from our side, not caller input -> Other. (Test blank.)
+        if resp.sandbox_id.trim().is_empty() {
+            return Err(SolariError::Other(
+                "Solari: the session response carried a blank id - a blank id builds a malformed /sandboxes// request"
+                    .to_string(),
+            ));
+        }
         let channel = ControlChannel::new(
             resp.control_url.clone(),
             http.auth_headers(),
             call_timeout_ms,
         );
-        Sandbox {
+        Ok(Sandbox {
             id: resp.sandbox_id,
             kind: resp.kind,
             control_url: resp.control_url,
@@ -269,7 +294,7 @@ impl Sandbox {
             expires_at: resp.expires_at,
             http,
             channel: Arc::new(channel),
-        }
+        })
     }
 
     /// The session id.

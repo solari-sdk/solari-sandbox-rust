@@ -160,8 +160,16 @@ impl HttpTransport {
                 let text = resp.text().await.unwrap_or_default();
                 let err_body: Option<GatewayErrorBody> =
                     if text.is_empty() { None } else { serde_json::from_str(&text).ok() };
-                // 5xx or an explicit `retryable` hint. NOT 429.
-                let retryable = status >= 500
+                // 🚨 ALLOWLIST, NOT `>= 500` — a 5xx is not automatically transient.
+                // The gateway's seven 501 sites (every /volumes route, permanently
+                // unavailable on GCP) were each retried 5x with backoff; the curve is
+                // visible in prod LB logs (04:47:11, +24s, +47s — doubling, which
+                // separates a retry loop from an evenly-spaced poll).
+                // 🪤 507 is named here rather than left to the `retryable` hint: the
+                // hint would cover it today, but that ties this SDK's correctness to
+                // which gateway build the caller reaches. 500 excluded (an unhandled
+                // error is not known-transient); 429 excluded as before.
+                let retryable = matches!(status, 502 | 503 | 504 | 507)
                     || err_body.as_ref().and_then(|b| b.retryable).unwrap_or(false);
                 if idempotent && retryable && attempt < self.max_retries {
                     tokio::time::sleep(self.backoff(attempt)).await;

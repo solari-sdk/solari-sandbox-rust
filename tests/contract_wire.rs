@@ -245,10 +245,20 @@ fn maximal_options() -> CreateOptions {
         envs: Some(HashMap::from([("FOO".to_string(), "bar".to_string())])),
         metadata: Some(HashMap::from([("proj".to_string(), "alpha".to_string())])),
         timeout_ms: Some(600_000),
+        ttl_seconds: Some(3600),
         from_snapshot: Some("snap_seed".into()),
+        // Isolation is set per-op below (dedicated for the sandbox, hardened
+        // for the desktop, matching the TS reference exactly) rather than
+        // here -- "shared" is refused for desktops, so the two calls cannot
+        // share one isolation value.
+        isolation: None,
         lifecycle: Some(Lifecycle {
             on_timeout: "pause".into(),
             auto_resume: Some(true),
+            park_after_ms: Some(30_000),
+            park_max_ms: Some(20_000),
+            hibernate_after_parked_ms: Some(90_000),
+            checkpoint_every_ms: Some(300_000),
         }),
         volumes: Some(vec![VolumeAttachment {
             volume_id: "vol_data".into(),
@@ -293,13 +303,16 @@ async fn wire_contract_matches_reference_sdk() {
 
         match name.as_str() {
             "createSandbox" => {
-                sbx = Some(client.create(maximal_options()).await.expect("createSandbox"));
+                let mut o = maximal_options();
+                o.isolation = Some("dedicated".into());
+                sbx = Some(client.create(o).await.expect("createSandbox"));
             }
             "createDesktop" => {
                 let mut o = maximal_options();
                 o.template = Some("default".into());
                 o.resolution = Some("1280x720".into());
                 o.record = Some(true);
+                o.isolation = Some("hardened".into());
                 let d = client.create_desktop(o).await.expect("createDesktop");
                 d.close();
             }

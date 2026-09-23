@@ -106,7 +106,8 @@ mod tests {
             Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
             resp,
             Some(5000),
-        );
+        )
+        .unwrap();
         sbx.connect().await.unwrap();
 
         let out = sbx.commands().run("echo", RunOptions::new().args(["hello"])).await.unwrap();
@@ -157,7 +158,8 @@ mod tests {
             Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
             resp,
             Some(5000),
-        );
+        )
+        .unwrap();
         sbx.connect().await.unwrap();
 
         let entries = sbx.files().list("/work").await.unwrap();
@@ -335,5 +337,34 @@ mod tests {
             }
         }
         None
+    }
+
+    // A blank id builds a nearly-right "/sandboxes//exec" (double slash), so it
+    // is rejected where it enters: Other for a blank id in a response (our
+    // side), Validation for a blank id the caller passed to connect().
+    #[tokio::test]
+    async fn blank_id_guard() {
+        let resp = CreateSandboxResponse {
+            sandbox_id: "".into(),
+            kind: "sandbox".into(),
+            control_url: "ws://127.0.0.1:1/control/".into(),
+            expires_at: "".into(),
+            stream_url: None,
+        };
+        let http = Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap());
+        match Sandbox::from_response(http, resp, Some(5000)) {
+            Err(SolariError::Other(_)) => {}
+            Err(e) => panic!("from_response(blank) = Err({e:?}), want Err(Other)"),
+            Ok(_) => panic!("from_response(blank) = Ok, want Err(Other)"),
+        }
+
+        let client = Client::new(ClientOptions::new("k", "http://127.0.0.1:1")).unwrap();
+        for id in ["", "   ", "\t"] {
+            match client.connect(id).await {
+                Err(SolariError::Validation { .. }) => {}
+                Err(e) => panic!("connect({id:?}) = Err({e:?}), want Validation"),
+                Ok(_) => panic!("connect({id:?}) = Ok, want Validation"),
+            }
+        }
     }
 }
