@@ -17,13 +17,25 @@ templates.
 
 ## Install
 
+🚨 **CORRECTED 2026-10-04** — this is the in-tree dev-source path from the
+monorepo (`pinetree-desktop/sdk/rust`), not an install for this published
+crate. The published crate name is also `solari-sandbox`, not `solari-sdk`
+(the `[package] name` in `Cargo.toml`).
+
 ```toml
 [dependencies]
-solari-sdk = { path = "sdk/rust" }
+solari-sandbox = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-The crate is `solari-sdk`; the root module is `solari`.
+The crate is `solari-sandbox`; the root module is `solari` (`[lib] name =
+"solari"` in `Cargo.toml` — that part was correct).
+
+~~```toml
+[dependencies]
+solari-sdk = { path = "sdk/rust" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```~~
 
 ## Example: create → run a command → git
 
