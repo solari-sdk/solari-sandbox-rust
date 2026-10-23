@@ -24,7 +24,7 @@ crate. The published crate name is also `solari-sandbox`, not `solari-sdk`
 
 ```toml
 [dependencies]
-solari-sandbox = "0.1"
+solari-sandbox = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
