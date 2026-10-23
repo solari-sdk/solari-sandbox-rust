@@ -15,7 +15,7 @@ use crate::files::Files;
 use crate::git::{Git, GitRunner};
 use crate::http::{encode_uri_component, new_idempotency_key, HttpOptions, HttpTransport};
 use crate::types::{
-    CommandResult, CreateSandboxRequest, CreateSandboxResponse, Lifecycle, ResumeResponse,
+    CommandResult, CreateSandboxRequest, CreateSandboxResponse, Lifecycle, ResumeResponse, StartResponse,
     SandboxView, VolumeAttachment,
 };
 
@@ -252,6 +252,44 @@ impl Client {
             )
         }))
     }
+
+    /// Cold-boot a STOPPED sandbox (`POST /sandboxes/:id/start`) from the disk the
+    /// host kept, and return the fresh control URL to re-attach to.
+    ///
+    /// A sandbox is stopped when its guest powered itself off. This is a cold
+    /// boot, not a resume: running processes and memory are gone, files on disk
+    /// are kept. It takes a concurrency slot (429 at the cap) and opens a new
+    /// billing segment. Idempotent: an already-running sandbox answers 200 and its
+    /// current control URL.
+    ///
+    /// Any other state is refused with `SolariError::Gateway { status: 409, code }`
+    /// where `code` is `NotStopped` (use [`Client::resume`] for a paused one) or
+    /// `StartInProgress`. A stopped disk that cannot be started answers 409 with
+    /// its code (`StoppedDiskMissing`, `StoppedDiskUnsafe`, `GoldenMismatch`,
+    /// `DiskPlatformMismatch`, `DiskShaMismatch`, `DiskExceedsSpec`,
+    /// `DiskOwnerMismatch`). 409 `HostCapabilityMissing` means the host pool is not
+    /// armed for start (not retryable). 503 `NoCapacity` / `StartTimeout` is
+    /// `SolariError::NoCapacity` and 502 `StartHostError` is a gateway error, both
+    /// retryable; 500 `StartFailed` is not, and leaves the sandbox stopped with its
+    /// disk, so a later start is safe.
+    pub async fn start(&self, sandbox_id: &str) -> Result<String, SolariError> {
+        let r: StartResponse = self
+            .http
+            .request(
+                "POST",
+                &format!("/sandboxes/{}/start", encode_uri_component(sandbox_id)),
+                None,
+                None,
+            )
+            .await?;
+        Ok(r.control_url.unwrap_or_else(|| {
+            format!(
+                "{}/control/{}",
+                self.http.ws_origin(),
+                encode_uri_component(sandbox_id)
+            )
+        }))
+    }
 }
 
 /// A live sandbox handle. Exposes the core namespaces.
@@ -370,6 +408,34 @@ impl Sandbox {
             .request(
                 "POST",
                 &format!("/sandboxes/{}/resume", encode_uri_component(&self.id)),
+                None,
+                None,
+            )
+            .await?;
+        let control_url = r.control_url.unwrap_or_else(|| {
+            format!(
+                "{}/control/{}",
+                self.http.ws_origin(),
+                encode_uri_component(&self.id)
+            )
+        });
+        self.control_url = control_url.clone();
+        self.channel.set_control_url(control_url);
+        self.channel.reconnect().await
+    }
+
+    /// Cold-boot this STOPPED session from its kept disk and re-point the control
+    /// channel at the fresh control URL. Processes and memory are gone, files on
+    /// disk are kept. See [`Client::start`] for the refusal codes.
+    ///
+    /// Takes `&mut self` for the same reason as [`Sandbox::resume`]: it replaces
+    /// this handle's `control_url`.
+    pub async fn start(&mut self) -> Result<(), SolariError> {
+        let r: StartResponse = self
+            .http
+            .request(
+                "POST",
+                &format!("/sandboxes/{}/start", encode_uri_component(&self.id)),
                 None,
                 None,
             )

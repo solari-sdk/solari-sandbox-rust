@@ -57,6 +57,7 @@ const IMPLEMENTED_OPS: &[&str] = &[
     "get",
     "pause",
     "resume",
+    "start",
     "kill",
 ];
 
@@ -222,6 +223,9 @@ fn canned_response(
         // control URL to re-attach to.
         return serde_json::json!({ "state": "running", "controlUrl": control_url }).to_string();
     }
+    if method == "POST" && path.ends_with("/start") {
+        return serde_json::json!({ "state": "running", "controlUrl": control_url }).to_string();
+    }
     if method == "GET" && path.starts_with("/sandboxes/") {
         return serde_json::json!({
             "sandboxId": CANONICAL_ID,
@@ -332,6 +336,14 @@ async fn wire_contract_matches_reference_sdk() {
                 assert!(
                     s.connected(),
                     "resume: control channel not re-opened on the fresh slot"
+                );
+            }
+            "start" => {
+                let s = sbx.as_mut().expect("no handle");
+                s.start().await.expect("start");
+                assert!(
+                    s.connected(),
+                    "start: control channel not re-opened on the fresh control URL"
                 );
             }
             "kill" => {

@@ -45,7 +45,7 @@ pub use http::{new_idempotency_key, HttpOptions, HttpTransport};
 pub use types::{
     Chart, ChartAxis, ChartType, CodeResultItem, CommandResult, CreateSandboxRequest,
     CreateSandboxResponse, FsEntry, FsStat, GatewayErrorBody, GitBranch, GitCommit, GitStatus,
-    Lifecycle, ResumeResponse, RunCodeResult, SandboxView, VolumeAttachment,
+    Lifecycle, ResumeResponse, RunCodeResult, SandboxView, StartResponse, VolumeAttachment,
 };
 
 #[cfg(test)]

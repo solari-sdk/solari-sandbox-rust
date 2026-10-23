@@ -109,6 +109,19 @@ pub struct ResumeResponse {
     pub control_url: Option<String>,
 }
 
+/// `POST /sandboxes/:id/start` reply. `control_url` is a fresh URL (the sandbox was
+/// cold-booted); `already_running` is set when it was already running.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartResponse {
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub control_url: Option<String>,
+    #[serde(default)]
+    pub already_running: Option<bool>,
+}
+
 /// `201` response from `POST /sandboxes`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
