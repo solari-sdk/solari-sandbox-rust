@@ -8,6 +8,7 @@
     "get",
     "pause",
     "resume",
+    "start",
     "kill"
   ],
   "requests": {
@@ -94,6 +95,10 @@
     "resume": {
       "method": "POST",
       "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/resume"
+    },
+    "start": {
+      "method": "POST",
+      "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/start"
     },
     "kill": {
       "method": "DELETE",
