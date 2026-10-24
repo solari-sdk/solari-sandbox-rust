@@ -1,0 +1,23 @@
+name: CI
+
+# Offline build and tests only. No secrets, no network beyond the loopback mocks, nothing is published.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      # Not --locked: Cargo.lock is not committed for this library crate.
+      # The live suite (sandbox) is gated on SOLARI_LIVE, which is not set here.
+      - name: cargo test
+        run: cargo test --all-features
