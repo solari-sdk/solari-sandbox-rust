@@ -139,6 +139,10 @@ impl HttpTransport {
             }
             if let Some(b) = &body_str {
                 rb = rb.header("Content-Type", "application/json").body(b.clone());
+            } else if matches!(method, "POST" | "PUT" | "PATCH") {
+                // reqwest sends NO Content-Length for a body-less POST, and the Google front end answers 411 Length
+                // Required (pause/resume/start failed against the real gateway). Say "empty body" explicitly.
+                rb = rb.header("Content-Length", "0");
             }
 
             let resp = match rb.send().await {
