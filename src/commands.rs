@@ -80,10 +80,31 @@ impl CommandHandle {
     }
 
     /// Wait for the command to exit, accumulating stdout/stderr.
-    pub async fn wait(mut self) -> Result<CommandResult, SolariError> {
+    pub async fn wait(self) -> Result<CommandResult, SolariError> {
+        self.wait_deadline(None).await
+    }
+
+    /// `wait` with an optional deadline. When it elapses the command is killed (SIGKILL) and the
+    /// result is exit -1 with the output so far, the same result the guest's own `/exec` timeout gives.
+    pub(crate) async fn wait_deadline(
+        mut self,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Result<CommandResult, SolariError> {
         let mut stdout = String::new();
         let mut stderr = String::new();
-        while let Some(frame) = self.rx.recv().await {
+        loop {
+            let next = match deadline {
+                Some(d) => match tokio::time::timeout_at(d, self.rx.recv()).await {
+                    Ok(frame) => frame,
+                    Err(_) => {
+                        let _ = self.kill(Some(9)).await;
+                        self.channel.unregister_command(&self.cmd_id);
+                        return Ok(CommandResult { exit_code: -1, stdout, stderr });
+                    }
+                },
+                None => self.rx.recv().await,
+            };
+            let Some(frame) = next else { break };
             match frame.typ.as_str() {
                 "cmd.data" => {
                     let text = frame
@@ -206,7 +227,12 @@ pub(crate) async fn run_command(
             stderr: String::new(),
         });
     }
-    handle.wait().await
+    // `timeout_ms` is a deadline for the command here too (it used to be honoured only by the REST path).
+    let deadline = opts
+        .timeout_ms
+        .filter(|t| *t > 0)
+        .map(|t| tokio::time::Instant::now() + std::time::Duration::from_millis(t));
+    handle.wait_deadline(deadline).await
 }
 
 /// POST `/sandboxes/:id/exec` — the one-shot fast path.
