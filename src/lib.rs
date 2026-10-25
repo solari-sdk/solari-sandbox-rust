@@ -116,6 +116,69 @@ mod tests {
         assert_eq!(out.stderr, "oops");
     }
 
+    /// `timeout_ms` is a command deadline on the WebSocket path: the command is killed (SIGKILL) and
+    /// the result is exit -1 with the output so far.
+    #[tokio::test]
+    async fn commands_run_timeout_kills_the_command() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ws_port = listener.local_addr().unwrap().port();
+        let killed = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let killed_srv = killed.clone();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let msg = ws.next().await.unwrap().unwrap();
+            let req: serde_json::Value = serde_json::from_str(msg.into_text().unwrap().as_str()).unwrap();
+            let id = req.get("id").unwrap().as_str().unwrap().to_string();
+            let out = base64::engine::general_purpose::STANDARD.encode("partial\n");
+            for f in [
+                format!("{{\"id\":\"{id}\",\"ok\":true,\"result\":{{\"cmdId\":\"c1\"}}}}"),
+                format!("{{\"type\":\"cmd.data\",\"cmdId\":\"c1\",\"stream\":\"stdout\",\"base64\":\"{out}\"}}"),
+            ] {
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(format!("{f}\n").into())).await.unwrap();
+            }
+            // The command never exits; the next frame must be cmd.kill.
+            if let Some(Ok(msg)) = ws.next().await {
+                let req: serde_json::Value = serde_json::from_str(msg.into_text().unwrap().as_str()).unwrap();
+                let id = req.get("id").unwrap().as_str().unwrap().to_string();
+                *killed_srv.lock().unwrap() = Some(req);
+                let _ = ws
+                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                        format!("{{\"id\":\"{id}\",\"ok\":true,\"result\":{{\"ok\":true}}}}\n").into(),
+                    ))
+                    .await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        });
+
+        let resp = CreateSandboxResponse {
+            sandbox_id: "sb".into(),
+            kind: "sandbox".into(),
+            control_url: format!("ws://127.0.0.1:{ws_port}/control/sb"),
+            expires_at: "".into(),
+            stream_url: None,
+        };
+        let sbx = Sandbox::from_response(
+            Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
+            resp,
+            Some(5000),
+        )
+        .unwrap();
+        sbx.connect().await.unwrap();
+
+        let started = std::time::Instant::now();
+        let mut opts = RunOptions::new().args(["3600"]);
+        opts.timeout_ms = Some(80);
+        let out = sbx.commands().run("sleep", opts).await.unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "run did not honour timeout_ms");
+        assert_eq!(out.exit_code, -1);
+        assert_eq!(out.stdout, "partial\n");
+        let kill = killed.lock().unwrap().clone().expect("cmd.kill was sent");
+        assert_eq!(kill["method"], "cmd.kill");
+        assert_eq!(kill["params"]["signal"], 9);
+        assert_eq!(kill["params"]["cmdId"], "c1");
+    }
+
     /// files().list / files().stat must parse the guest wire shape exactly:
     /// the directory flag is "dir" (not "isDir") and the stat timestamp is
     /// "modTimeMs". Regression guard for the wire-field bug.
