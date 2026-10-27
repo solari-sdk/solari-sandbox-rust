@@ -24,7 +24,7 @@ crate. The published crate name is also `solari-sandbox`, not `solari-sdk`
 
 ```toml
 [dependencies]
-solari-sandbox = "0.2"
+solari-sandbox = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -46,10 +46,9 @@ use solari::{GitCloneOptions, GitCommitOptions};
 #[tokio::main]
 async fn main() -> Result<(), solari::SolariError> {
     // 1. Client + create a sandbox.
-    let client = Client::new(ClientOptions::new(
-        "slr_live_…",                 // API key (also authenticates the WS)
-        "https://gw.example.com",     // gateway base URL
-    ))?;
+    // API key (also authenticates the WS). The hosted API is the default;
+    // use `ClientOptions::new(key, "https://…")` for another gateway.
+    let client = Client::new(ClientOptions::with_api_key("slr_live_…"))?;
 
     let sbx = client
         .create(CreateOptions {

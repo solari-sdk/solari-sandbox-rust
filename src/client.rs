@@ -19,16 +19,25 @@ use crate::types::{
     SandboxView, VolumeAttachment,
 };
 
+/// The hosted Solari API, used when [`ClientOptions::base_url`] is empty.
+pub const DEFAULT_BASE_URL: &str = "https://api.getsolari.com";
+
 /// Options for constructing a [`Client`].
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
     pub api_key: String,
+    /// Gateway origin. Empty means [`DEFAULT_BASE_URL`].
     pub base_url: String,
     /// Per-call control-WS RPC timeout override (ms). Defaults to 300000.
     pub call_timeout_ms: Option<u64>,
 }
 
 impl ClientOptions {
+    /// Options for the hosted Solari API ([`DEFAULT_BASE_URL`]).
+    pub fn with_api_key(api_key: impl Into<String>) -> Self {
+        Self::new(api_key, DEFAULT_BASE_URL)
+    }
+
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
         ClientOptions {
             api_key: api_key.into(),
@@ -107,7 +116,8 @@ pub struct Client {
 
 impl Client {
     pub fn new(opts: ClientOptions) -> Result<Self, SolariError> {
-        let http = HttpTransport::new(HttpOptions::new(opts.api_key, opts.base_url))?;
+        let base_url = if opts.base_url.is_empty() { DEFAULT_BASE_URL.to_string() } else { opts.base_url };
+        let http = HttpTransport::new(HttpOptions::new(opts.api_key, base_url))?;
         Ok(Client {
             http: Arc::new(http),
             call_timeout_ms: opts.call_timeout_ms,
