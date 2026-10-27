@@ -13,7 +13,7 @@
 //! use solari::{Client, ClientOptions, CreateOptions, RunOptions};
 //!
 //! # async fn ex() -> Result<(), solari::SolariError> {
-//! let client = Client::new(ClientOptions::new("slr_live_…", "https://gw.example.com"))?;
+//! let client = Client::new(ClientOptions::with_api_key("slr_live_…"))?;
 //! let sbx = client.create(CreateOptions { template: Some("base".into()), ..Default::default() }).await?;
 //! let out = sbx.commands().run("echo", RunOptions::new().args(["hello"])).await?;
 //! println!("exit={} stdout={}", out.exit_code, out.stdout);
@@ -33,7 +33,7 @@ mod http;
 mod types;
 
 pub use channel::{AsyncFrame, ControlChannel};
-pub use client::{Client, ClientOptions, CreateOptions, Sandbox};
+pub use client::{Client, ClientOptions, CreateOptions, Sandbox, DEFAULT_BASE_URL};
 pub use code::{Code, RunCodeOptions};
 pub use commands::{CommandHandle, Commands, OutputCallback, RunOptions};
 pub use error::SolariError;
@@ -429,5 +429,21 @@ mod tests {
                 Ok(_) => panic!("connect({id:?}) = Ok, want Validation"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod default_base_url_tests {
+    use super::*;
+
+    #[test]
+    fn with_api_key_uses_the_hosted_api() {
+        assert_eq!(DEFAULT_BASE_URL, "https://api.getsolari.com");
+        assert_eq!(ClientOptions::with_api_key("k").base_url, DEFAULT_BASE_URL);
+    }
+
+    #[test]
+    fn empty_base_url_builds_a_client() {
+        assert!(Client::new(ClientOptions::new("k", "")).is_ok());
     }
 }
