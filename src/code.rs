@@ -39,6 +39,26 @@ pub(crate) fn build_run_code_result(v: Value) -> RunCodeResult {
     }
 }
 
+/// Sends `code.interrupt` when a `code.run` future is dropped while the kernel is still running its code.
+struct InterruptGuard {
+    channel: Option<std::sync::Arc<crate::channel::ControlChannel>>,
+    context_id: Option<String>,
+}
+
+impl Drop for InterruptGuard {
+    fn drop(&mut self) {
+        let Some(channel) = self.channel.take() else { return };
+        let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+        let mut p = Map::new();
+        if let Some(id) = self.context_id.take() {
+            p.insert("contextId".into(), Value::String(id));
+        }
+        rt.spawn(async move {
+            let _ = channel.call("code.interrupt", Value::Object(p)).await;
+        });
+    }
+}
+
 /// The ergonomic `code` accessor returned by `Sandbox::code()`.
 pub struct Code<'a> {
     pub(crate) sb: &'a Sandbox,
@@ -56,8 +76,12 @@ impl<'a> Code<'a> {
         if let Some(ctx) = &opts.context_id {
             p.insert("contextId".into(), Value::String(ctx.clone()));
         }
-        let raw = self.sb.channel().call("code.run", Value::Object(p)).await?;
-        Ok(build_run_code_result(raw))
+        // If this future is dropped before the kernel answers, ask the guest to interrupt the code (best effort: a guest
+        // that does not know `code.interrupt` answers with an error, which is ignored).
+        let mut interrupt = InterruptGuard { channel: Some(self.sb.channel_arc()), context_id: opts.context_id.clone() };
+        let raw = self.sb.channel().call("code.run", Value::Object(p)).await;
+        interrupt.channel = None;
+        Ok(build_run_code_result(raw?))
     }
 }
 

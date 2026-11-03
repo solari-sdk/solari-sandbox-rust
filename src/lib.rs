@@ -23,6 +23,8 @@
 //! ```
 
 mod channel;
+#[cfg(test)]
+mod concurrency_tests;
 mod client;
 mod code;
 mod commands;
@@ -35,7 +37,7 @@ mod types;
 pub use channel::{AsyncFrame, ControlChannel};
 pub use client::{Client, ClientOptions, CreateOptions, Sandbox, DEFAULT_BASE_URL};
 pub use code::{Code, RunCodeOptions};
-pub use commands::{CommandHandle, Commands, OutputCallback, RunOptions};
+pub use commands::{CommandHandle, CommandIo, Commands, OutputCallback, RunOptions};
 pub use error::SolariError;
 pub use files::Files;
 pub use git::{
