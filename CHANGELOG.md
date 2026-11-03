@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.3
+
+### Added
+- **`files().upload` and `files().download`** move a file in 4 MiB chunks (`fs.upload` / `fs.download`), so a large file never travels as one frame. A 48 MiB file used to be a 64 MiB frame that closed the control channel and failed every call in flight on it; reads failed from 12 MiB (the websocket's 16 MiB frame limit after base64). `files().read` now reads through the same chunked loop (a guest image that predates `fs.download` is read with `fs.read`).
+- **`CommandHandle::io()`** returns a cloneable `CommandIo` (`stdin`, `close_stdin`, `kill`). `wait` consumes the handle, so a command could not be written to while another task waited on it; take the `CommandIo` first.
+
+### Changed
+- `files().write` refuses more than 32 MiB before sending anything (`file too large for a single call (N bytes, max 33554432): use files.upload()/files.download() or uploadUrl()`), so one big call fails alone and the channel stays up. Use `upload` for larger files.
+
+### Fixed
+- **Dropping a `Sandbox` closes its socket.** `ControlChannel` had no `Drop`: the reader task kept the channel state alive, the state kept the writer's sender alive, and the writer task waited on it, so the socket and both tasks ran until the server hung up.
+- **`background: true` delivers output to `on_stdout` / `on_stderr`.** Nothing drove the command's output once `run` returned, so the callbacks were never called.
+- **Dropping a `commands().run` future (or a `tokio::time::timeout` around it) stops the guest process.** It gets SIGTERM and a closed stdin at once and SIGKILL 2 s later; before, it ran on. Dropping a `code().run` future asks the guest to interrupt the kernel (`code.interrupt`; a guest that does not know it is ignored). The one-shot `/exec` path needs nothing: the gateway kills the process when the request goes away.
+
 ## 0.3.2
 
 ### Fixed

@@ -50,6 +50,72 @@ impl RunOptions {
     }
 }
 
+/// How long a cancelled command gets to exit after SIGTERM before it is SIGKILLed.
+const CANCEL_KILL_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A cloneable handle on a running command's input side: write or close stdin and send signals while another task is
+/// blocked in [`CommandHandle::wait`] (which consumes the handle). Get one with [`CommandHandle::io`].
+#[derive(Clone)]
+pub struct CommandIo {
+    cmd_id: String,
+    channel: Arc<ControlChannel>,
+}
+
+impl CommandIo {
+    /// The command id.
+    pub fn cmd_id(&self) -> &str {
+        &self.cmd_id
+    }
+
+    /// Write bytes to the command's stdin.
+    pub async fn stdin(&self, data: impl AsRef<[u8]>) -> Result<(), SolariError> {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(data.as_ref());
+        let mut p = Map::new();
+        p.insert("cmdId".into(), Value::String(self.cmd_id.clone()));
+        p.insert("base64".into(), Value::String(b64));
+        self.channel.call("cmd.stdin", Value::Object(p)).await.map(|_| ())
+    }
+
+    /// Close the command's stdin (the guest writes nothing, then closes it).
+    pub async fn close_stdin(&self) -> Result<(), SolariError> {
+        let mut p = Map::new();
+        p.insert("cmdId".into(), Value::String(self.cmd_id.clone()));
+        p.insert("base64".into(), Value::String(String::new()));
+        p.insert("eof".into(), Value::Bool(true));
+        self.channel.call("cmd.stdin", Value::Object(p)).await.map(|_| ())
+    }
+
+    /// Send a signal (default SIGTERM guest-side).
+    pub async fn kill(&self, signal: Option<i64>) -> Result<(), SolariError> {
+        let mut p = Map::new();
+        p.insert("cmdId".into(), Value::String(self.cmd_id.clone()));
+        if let Some(s) = signal {
+            p.insert("signal".into(), Value::from(s));
+        }
+        self.channel.call("cmd.kill", Value::Object(p)).await.map(|_| ())
+    }
+}
+
+/// Stops the guest process when a `commands.run` future is dropped before the command finished: SIGTERM and a closed stdin
+/// at once, SIGKILL after [`CANCEL_KILL_GRACE`]. Disarmed once the run returns. Every call is best effort (a command that
+/// already finished answers with an error).
+struct CancelGuard {
+    io: Option<CommandIo>,
+}
+
+impl Drop for CancelGuard {
+    fn drop(&mut self) {
+        let Some(io) = self.io.take() else { return };
+        let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+        rt.spawn(async move {
+            let _ = io.kill(Some(15)).await;
+            let _ = io.close_stdin().await;
+            tokio::time::sleep(CANCEL_KILL_GRACE).await;
+            let _ = io.kill(Some(9)).await;
+        });
+    }
+}
+
 /// A started command handle (`commands.start`).
 pub struct CommandHandle {
     pub cmd_id: String,
@@ -60,6 +126,12 @@ pub struct CommandHandle {
 }
 
 impl CommandHandle {
+    /// A cloneable handle on this command's input side. [`wait`](Self::wait) consumes the handle, so take this first to
+    /// keep writing stdin or signalling while another task waits.
+    pub fn io(&self) -> CommandIo {
+        CommandIo { cmd_id: self.cmd_id.clone(), channel: self.channel.clone() }
+    }
+
     /// Write bytes to the command's stdin.
     pub async fn stdin(&self, data: impl AsRef<[u8]>) -> Result<(), SolariError> {
         let b64 = base64::engine::general_purpose::STANDARD.encode(data.as_ref());
@@ -311,6 +383,12 @@ pub(crate) async fn run_command(
 
     let handle = start_command(sb, cmd, opts).await?;
     if opts.background {
+        // Nobody awaits a background command, so something has to drive its output to the callbacks: they were never called.
+        if opts.on_stdout.is_some() || opts.on_stderr.is_some() {
+            tokio::spawn(async move {
+                let _ = handle.wait().await;
+            });
+        }
         return Ok(CommandResult {
             exit_code: 0,
             stdout: String::new(),
@@ -323,7 +401,10 @@ pub(crate) async fn run_command(
         .timeout_ms
         .filter(|t| *t > 0)
         .map(|t| tokio::time::Instant::now() + std::time::Duration::from_millis(t));
-    handle.wait_deadline(deadline).await
+    let mut guard = CancelGuard { io: Some(handle.io()) };
+    let result = handle.wait_deadline(deadline).await;
+    guard.io = None; // finished (or failed) on its own: nothing to stop
+    result
 }
 
 /// POST `/sandboxes/:id/exec` — the one-shot fast path.

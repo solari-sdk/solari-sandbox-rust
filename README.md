@@ -68,6 +68,7 @@ async fn main() -> Result<(), solari::SolariError> {
     // 3. Files.
     sbx.files().write("/tmp/hi.txt", "hi", None).await?;
     let text = sbx.files().read_text("/tmp/hi.txt").await?;
+    // Files over 32 MiB: sbx.files().upload(path, bytes) / download(path) move them in 4 MiB chunks.
     println!("file: {text}");
 
     // 4. Git — client-side, composed over `git` invocations (no shell).

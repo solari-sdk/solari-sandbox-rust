@@ -180,6 +180,15 @@ fn normalize_rpc_error(err: Option<&Value>) -> (String, Option<String>) {
     }
 }
 
+/// Dropping the last reference closes the socket. Without this the reader task kept the channel state alive, the state kept
+/// the outbound sender alive, and the writer task waited on that sender, so a dropped `Sandbox` left its socket and both
+/// tasks running until the server hung up.
+impl Drop for ControlChannel {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 /// The shared control-WS transport. Construct one per live session handle.
 pub struct ControlChannel {
     control_url: Mutex<String>,
