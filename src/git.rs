@@ -6,11 +6,11 @@
 //! unit-tested with a stub that returns canned [`CommandResult`]s (no live WS),
 //! exactly like the TS `git.test.mjs` stubs `runCommand`.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
 use crate::error::SolariError;
-use crate::http::encode_uri_component;
 use crate::types::{CommandResult, GitBranch, GitCommit, GitStatus};
 
 /// The seam the git namespace runs commands through. `Sandbox` implements it by
@@ -21,6 +21,25 @@ pub trait GitRunner: Send + Sync {
         args: Vec<String>,
         cwd: Option<String>,
     ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>>;
+
+    /// Like [`run_git`](GitRunner::run_git) with environment variables for the command (used to hand credentials to
+    /// git). The default refuses rather than dropping them: a runner that cannot pass an environment must not run an
+    /// authenticated command as an unauthenticated one.
+    fn run_git_env<'a>(
+        &'a self,
+        args: Vec<String>,
+        cwd: Option<String>,
+        env: Option<HashMap<String, String>>,
+    ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
+        match env {
+            None => self.run_git(args, cwd),
+            Some(_) => Box::pin(async {
+                Err(SolariError::Git {
+                    message: "this git runner cannot pass environment variables".to_string(),
+                })
+            }),
+        }
+    }
 }
 
 /// Options for `git.clone`.
@@ -72,10 +91,21 @@ impl<'a> Git<'a> {
 
     /// Run `git <args>`; return stdout, or an error with stderr on non-zero exit.
     async fn must_git(&self, args: Vec<String>, cwd: Option<String>) -> Result<String, SolariError> {
-        let sub = args.first().cloned().unwrap_or_default();
-        let r = self.runner.run_git(args, cwd).await?;
+        self.must_git_env(args, cwd, None, None).await
+    }
+
+    /// As [`must_git`](Self::must_git) with an environment for the command; a `secret` is masked in the message.
+    async fn must_git_env(
+        &self,
+        args: Vec<String>,
+        cwd: Option<String>,
+        env: Option<HashMap<String, String>>,
+        secret: Option<&str>,
+    ) -> Result<String, SolariError> {
+        let sub = git_subcommand(&args);
+        let r = self.runner.run_git_env(args, cwd, env).await?;
         if r.exit_code != 0 {
-            let detail = {
+            let mut detail = {
                 let s = r.stderr.trim();
                 if !s.is_empty() {
                     s.to_string()
@@ -83,6 +113,9 @@ impl<'a> Git<'a> {
                     r.stdout.trim().to_string()
                 }
             };
+            if let Some(sec) = secret.filter(|s| !s.is_empty()) {
+                detail = detail.replace(sec, "***");
+            }
             return Err(SolariError::Git {
                 message: format!("git {} failed (exit {}): {}", sub, r.exit_code, detail),
             });
@@ -92,7 +125,9 @@ impl<'a> Git<'a> {
 
     /// Clone `url` into `opts.path` under `opts.cwd`.
     pub async fn clone(&self, url: &str, opts: GitCloneOptions) -> Result<(), SolariError> {
-        let mut args = vec!["clone".to_string()];
+        let auth = git_auth(url, opts.username.as_deref(), opts.password.as_deref())?;
+        let mut args: Vec<String> = auth.as_ref().map(|a| a.0.clone()).unwrap_or_default();
+        args.push("clone".into());
         if let Some(d) = opts.depth {
             if d > 0 {
                 args.push("--depth".into());
@@ -103,11 +138,15 @@ impl<'a> Git<'a> {
             args.push("--branch".into());
             args.push(b.clone());
         }
-        args.push(auth_url(url, opts.username.as_deref(), opts.password.as_deref()));
+        // `--` ends options: a url such as "--upload-pack=cmd" is then a (bad) repository, not an option.
+        args.push("--".into());
+        args.push(url.to_string());
         if let Some(p) = &opts.path {
             args.push(p.clone());
         }
-        self.must_git(args, opts.cwd).await.map(|_| ())
+        self.must_git_env(args, opts.cwd, auth.map(|a| a.1), opts.password.as_deref())
+            .await
+            .map(|_| ())
     }
 
     /// Parsed working-tree status.
@@ -177,34 +216,31 @@ impl<'a> Git<'a> {
 
     async fn push_pull(&self, op: &str, opts: GitRemoteOptions) -> Result<(), SolariError> {
         let remote = opts.remote.clone().unwrap_or_else(|| "origin".to_string());
-        let mut cfg: Vec<String> = Vec::new();
+        reject_option_like("remote", &remote)?;
+        if let Some(b) = &opts.branch {
+            reject_option_like("branch", b)?;
+        }
+        let mut auth = None;
         if opts.username.is_some() || opts.password.is_some() {
-            // One-off HTTPS auth without persisting a credential.
+            // The helper is bound to the remote's origin, so resolve the remote's URL first.
             let plain = self
-                .runner
-                .run_git(
-                    vec!["remote".into(), "get-url".into(), remote.clone()],
+                .must_git(
+                    vec!["remote".into(), "get-url".into(), "--".into(), remote.clone()],
                     opts.cwd.clone(),
                 )
-                .await?
-                .stdout
-                .trim()
-                .to_string();
-            if !plain.is_empty() {
-                let authed = auth_url(&plain, opts.username.as_deref(), opts.password.as_deref());
-                if authed != plain {
-                    cfg.push("-c".into());
-                    cfg.push(format!("url.{authed}.insteadOf={plain}"));
-                }
-            }
+                .await?;
+            auth = git_auth(plain.trim(), opts.username.as_deref(), opts.password.as_deref())?;
         }
-        let mut args = cfg;
+        let mut args: Vec<String> = auth.as_ref().map(|a| a.0.clone()).unwrap_or_default();
         args.push(op.to_string());
+        args.push("--".into());
         args.push(remote);
         if let Some(b) = &opts.branch {
             args.push(b.clone());
         }
-        self.must_git(args, opts.cwd).await.map(|_| ())
+        self.must_git_env(args, opts.cwd, auth.map(|a| a.1), opts.password.as_deref())
+            .await
+            .map(|_| ())
     }
 
     /// Check out an existing ref, or create a branch with `create: true`.
@@ -214,11 +250,15 @@ impl<'a> Git<'a> {
         cwd: Option<&str>,
         create: bool,
     ) -> Result<(), SolariError> {
+        // A ref that starts with "-" would be read as an option ("--orphan=x" created a branch). Git never allows one
+        // as a branch name, so refuse it rather than guess.
+        reject_option_like("ref", r#ref)?;
         let mut args = vec!["checkout".to_string()];
         if create {
             args.push("-b".into());
         }
         args.push(r#ref.to_string());
+        args.push("--".into());
         self.must_git(args, cwd.map(String::from)).await.map(|_| ())
     }
 
@@ -254,30 +294,78 @@ impl<'a> Git<'a> {
 
 // --- pure parsers + arg helpers (directly unit-testable) --------------------
 
-/// Splice basic-auth creds into an https remote URL. On any parse failure,
-/// returns the URL unchanged. `p@ss word` → `p%40ss%20word`.
-pub(crate) fn auth_url(url: &str, username: Option<&str>, password: Option<&str>) -> String {
-    let has_user = username.map(|u| !u.is_empty()).unwrap_or(false);
-    let has_pass = password.map(|p| !p.is_empty()).unwrap_or(false);
-    if !has_user && !has_pass {
-        return url.to_string();
+/// Inline git credential helper: answers `get` from the command's environment, ignores `store` / `erase`, and holds no
+/// secret.
+const GIT_CREDENTIAL_HELPER: &str = r#"!f() { test "$1" = get && printf "username=%s\npassword=%s\n" "$SOLARI_GIT_USERNAME" "$SOLARI_GIT_PASSWORD"; }; f"#;
+
+/// The `-c` options and environment for ONE git command that must authenticate to a private https remote. The
+/// credentials travel as environment variables of that command and git reads them back through the inline helper, so
+/// they are never in the URL (and so not in `.git/config`, a snapshot or a template), never in argv
+/// (`/proc/<pid>/cmdline`) and never in a config file. `None` when there are no credentials.
+pub(crate) fn git_auth(
+    remote_url: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Result<Option<(Vec<String>, HashMap<String, String>)>, SolariError> {
+    let u = username.unwrap_or("");
+    let p = password.unwrap_or("");
+    if u.is_empty() && p.is_empty() {
+        return Ok(None);
     }
-    let mut parsed = match url::Url::parse(url) {
-        Ok(u) => u,
-        Err(_) => return url.to_string(),
+    if u.contains(['\r', '\n', '\0']) || p.contains(['\r', '\n', '\0']) {
+        return Err(SolariError::Git {
+            message: "git credentials must not contain line breaks or NUL".to_string(),
+        });
+    }
+    // The helper is bound to the remote's origin, so git never offers the password to another host: a redirect to a
+    // different host, or a downgrade to http, gets nothing. Not http(s) (ssh, scp-style): no credentials apply.
+    let parsed = match url::Url::parse(remote_url) {
+        Ok(x) if x.scheme() == "http" || x.scheme() == "https" => x,
+        _ => return Ok(None),
     };
-    if let Some(u) = username {
-        // encodeURIComponent, then set — mirrors the TS `u.username = encodeURIComponent(...)`.
-        if parsed.set_username(&encode_uri_component(u)).is_err() {
-            return url.to_string();
-        }
+    let Some(host) = parsed.host_str() else {
+        return Ok(None);
+    };
+    let host = if host.contains(':') { format!("[{host}]") } else { host.to_string() };
+    let origin = match parsed.port() {
+        Some(port) => format!("{}://{}:{}", parsed.scheme(), host, port),
+        None => format!("{}://{}", parsed.scheme(), host),
+    };
+    if origin.contains(['=', ' ', '\t', '\r', '\n']) {
+        return Ok(None);
     }
-    if let Some(p) = password {
-        if parsed.set_password(Some(&encode_uri_component(p))).is_err() {
-            return url.to_string();
-        }
+    let cfg = vec![
+        // The empty value first clears any helper configured on the guest, so only ours answers...
+        "-c".to_string(),
+        "credential.helper=".to_string(),
+        // ...and only for this origin.
+        "-c".to_string(),
+        format!("credential.{origin}.helper={GIT_CREDENTIAL_HELPER}"),
+    ];
+    let mut env = HashMap::new();
+    env.insert("GIT_TERMINAL_PROMPT".to_string(), "0".to_string());
+    env.insert("SOLARI_GIT_USERNAME".to_string(), u.to_string());
+    env.insert("SOLARI_GIT_PASSWORD".to_string(), p.to_string());
+    Ok(Some((cfg, env)))
+}
+
+/// The git subcommand in an argv that may start with `-c k=v` pairs.
+fn git_subcommand(args: &[String]) -> String {
+    let mut i = 0;
+    while i + 1 < args.len() && args[i] == "-c" {
+        i += 2;
     }
-    parsed.to_string()
+    args.get(i).cloned().unwrap_or_default()
+}
+
+/// Refuse user text that git would parse as an option.
+fn reject_option_like(what: &str, v: &str) -> Result<(), SolariError> {
+    if v.starts_with('-') {
+        return Err(SolariError::Git {
+            message: format!("git {what} must not start with \"-\": {v:?}"),
+        });
+    }
+    Ok(())
 }
 
 /// Parse `git status --porcelain=v1 --branch` output.
@@ -390,6 +478,7 @@ mod tests {
     struct RecordedCall {
         args: Vec<String>,
         cwd: Option<String>,
+        env: Option<HashMap<String, String>>,
     }
 
     /// Stub runner mirroring `stubGit` in git.test.mjs: records calls and maps
@@ -424,9 +513,19 @@ mod tests {
             args: Vec<String>,
             cwd: Option<String>,
         ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
+            self.run_git_env(args, cwd, None)
+        }
+
+        fn run_git_env<'a>(
+            &'a self,
+            args: Vec<String>,
+            cwd: Option<String>,
+            env: Option<HashMap<String, String>>,
+        ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
             self.calls.lock().unwrap().push(RecordedCall {
                 args: args.clone(),
                 cwd,
+                env,
             });
             let r = (self.responder)(&args);
             Box::pin(async move { Ok(r) })
@@ -573,7 +672,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clone_injects_basic_auth_into_https_remote() {
+    async fn clone_sends_credentials_by_env_and_origin_bound_helper_never_in_url_or_argv() {
         let stub = StubGit::new(|_| StubGit::ok(""));
         let git = Git::new(&stub);
         git.clone(
@@ -592,13 +691,128 @@ mod tests {
         let calls = stub.calls.lock().unwrap();
         let c = &calls[0];
         assert_eq!(c.cwd.as_deref(), Some("/work"));
-        assert_eq!(&c.args[0..5], &["clone", "--depth", "1", "--branch", "main"]);
-        let url = &c.args[5];
-        assert!(
-            url.starts_with("https://u:p%40ss%20word@github.com/"),
-            "got {url}"
+        assert_eq!(&c.args[0..3], &["-c", "credential.helper=", "-c"]);
+        assert!(c.args[3].starts_with("credential.https://github.com.helper=!f()"), "got {}", c.args[3]);
+        assert_eq!(
+            &c.args[4..],
+            &["clone", "--depth", "1", "--branch", "main", "--", "https://github.com/acme/repo.git", "dest"]
         );
-        assert_eq!(c.args[6], "dest");
+        let env = c.env.as_ref().unwrap();
+        assert_eq!(env["SOLARI_GIT_USERNAME"], "u");
+        assert_eq!(env["SOLARI_GIT_PASSWORD"], "p@ss word");
+        assert_eq!(env["GIT_TERMINAL_PROMPT"], "0");
+        let argv = c.args.join(" ");
+        assert!(!argv.contains("p@ss") && !argv.contains("p%40ss") && !argv.contains("u:"), "credential in argv: {argv}");
+    }
+
+    #[tokio::test]
+    async fn clone_puts_dashdash_before_a_user_url_and_sends_no_helper_without_creds() {
+        let stub = StubGit::new(|_| StubGit::ok(""));
+        let git = Git::new(&stub);
+        git.clone(
+            "--upload-pack=touch /tmp/pwned",
+            GitCloneOptions { path: Some("dest".into()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(calls[0].args, vec!["clone", "--", "--upload-pack=touch /tmp/pwned", "dest"]);
+        assert!(calls[0].env.is_none());
+    }
+
+    #[tokio::test]
+    async fn credentials_with_line_breaks_are_refused_and_the_password_is_masked_in_errors() {
+        let stub = StubGit::new(|_| StubGit::ok(""));
+        let git = Git::new(&stub);
+        let err = git
+            .clone(
+                "https://h/r.git",
+                GitCloneOptions { username: Some("u".into()), password: Some("a\nurl=https://evil".into()), ..Default::default() },
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("line breaks"), "got {err}");
+        let stub2 = StubGit::new(|_| CommandResult {
+            exit_code: 128,
+            stdout: String::new(),
+            stderr: "fatal: unable to access: hunter2 rejected".into(),
+        });
+        let err = Git::new(&stub2)
+            .clone(
+                "https://h/r.git",
+                GitCloneOptions { username: Some("u".into()), password: Some("hunter2".into()), ..Default::default() },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("git clone failed") && !err.contains("hunter2"), "got {err}");
+    }
+
+    #[tokio::test]
+    async fn push_resolves_the_remote_url_binds_the_helper_to_its_origin_and_keeps_the_secret_out_of_argv() {
+        let stub = StubGit::new(|args| {
+            if args[0] == "remote" {
+                return StubGit::ok("https://git.example.com:8443/acme/repo.git\n");
+            }
+            StubGit::ok("")
+        });
+        let git = Git::new(&stub);
+        git.push(GitRemoteOptions {
+            cwd: Some("/repo".into()),
+            username: Some("u".into()),
+            password: Some("p@ss".into()),
+            branch: Some("main".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(calls[0].args, vec!["remote", "get-url", "--", "origin"]);
+        assert!(calls[0].env.is_none());
+        let push = &calls[1].args;
+        assert_eq!(&push[0..2], &["-c", "credential.helper="]);
+        assert!(push[3].starts_with("credential.https://git.example.com:8443.helper=!f()"), "got {}", push[3]);
+        assert_eq!(&push[4..], &["push", "--", "origin", "main"]);
+        assert_eq!(calls[1].env.as_ref().unwrap()["SOLARI_GIT_PASSWORD"], "p@ss");
+        assert!(!push.join(" ").contains("p@ss"));
+    }
+
+    #[tokio::test]
+    async fn credentials_are_not_used_for_an_ssh_remote_and_a_plain_push_is_plain() {
+        let stub = StubGit::new(|args| {
+            if args[0] == "remote" {
+                return StubGit::ok("git@github.com:acme/repo.git\n");
+            }
+            StubGit::ok("")
+        });
+        let git = Git::new(&stub);
+        git.pull(GitRemoteOptions {
+            username: Some("u".into()),
+            password: Some("p".into()),
+            remote: Some("upstream".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        git.push(GitRemoteOptions::default()).await.unwrap();
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(calls[0].args, vec!["remote", "get-url", "--", "upstream"]);
+        assert_eq!(calls[1].args, vec!["pull", "--", "upstream"]);
+        assert!(calls[1].env.is_none());
+        assert_eq!(calls[2].args, vec!["push", "--", "origin"]);
+    }
+
+    #[tokio::test]
+    async fn option_like_remotes_branches_and_refs_are_refused_before_anything_runs() {
+        let stub = StubGit::new(|_| StubGit::ok(""));
+        let git = Git::new(&stub);
+        assert!(git.push(GitRemoteOptions { remote: Some("--receive-pack=x".into()), ..Default::default() }).await.is_err());
+        assert!(git.pull(GitRemoteOptions { branch: Some("--rebase".into()), ..Default::default() }).await.is_err());
+        assert!(git.checkout("--orphan=x", None, false).await.is_err());
+        git.checkout("dev", Some("/repo"), true).await.unwrap();
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "only the valid checkout reached the runner");
+        assert_eq!(calls[0].args, vec!["checkout", "-b", "dev", "--"]);
     }
 
     #[tokio::test]
@@ -624,15 +838,5 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("not a git repository"), "got {msg}");
         assert!(msg.contains("git status failed (exit 128)"), "got {msg}");
-    }
-
-    #[test]
-    fn auth_url_unchanged_without_creds_or_on_parse_failure() {
-        assert_eq!(auth_url("https://x/y.git", None, None), "https://x/y.git");
-        // scp-style / non-URL: left untouched.
-        assert_eq!(
-            auth_url("git@github.com:acme/repo.git", Some("u"), Some("p")),
-            "git@github.com:acme/repo.git"
-        );
     }
 }

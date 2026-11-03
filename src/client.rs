@@ -512,10 +512,20 @@ impl GitRunner for Sandbox {
         args: Vec<String>,
         cwd: Option<String>,
     ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
+        self.run_git_env(args, cwd, None)
+    }
+
+    fn run_git_env<'a>(
+        &'a self,
+        args: Vec<String>,
+        cwd: Option<String>,
+        env: Option<std::collections::HashMap<String, String>>,
+    ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
         Box::pin(async move {
             let opts = RunOptions {
                 args: Some(args),
                 cwd,
+                env,
                 ..Default::default()
             };
             run_command(self, "git", &opts).await
