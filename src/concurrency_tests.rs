@@ -365,3 +365,33 @@ async fn a_dropped_code_run_interrupts_the_kernel() {
         .await
         .expect("the channel is unusable after a cancelled code.run");
 }
+
+#[tokio::test]
+async fn a_finished_code_run_sends_no_interrupt() {
+    let gw = gateway(Arc::new(|method, _| match method {
+        "code.run" => vec![reply(
+            json!({"results": [{"type": "stdout", "text": "ok"}]}),
+        )],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let sbx = sandbox(&gw);
+    let code = sbx.code();
+    let out = code
+        .run(
+            "print('ok')",
+            crate::code::RunCodeOptions {
+                context_id: Some("k1".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.results.len(), 1);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        methods(&gw.calls),
+        vec!["code.run"],
+        "a code run that finished must not be interrupted"
+    );
+}
