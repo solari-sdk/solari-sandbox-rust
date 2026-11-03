@@ -333,8 +333,9 @@ async fn a_finished_run_sends_no_cancel_calls() {
 #[tokio::test]
 async fn a_dropped_code_run_interrupts_the_kernel() {
     let gw = gateway(Arc::new(|method, _| match method {
-        "code.run" => vec![],                              // never answers
-        _ => vec![fail("unknown method: code.interrupt")], // an older guest: ignored
+        "code.run" => vec![], // never answers
+        "code.interrupt" => vec![fail("unknown method: code.interrupt")], // today's guest: ignored
+        _ => vec![reply(json!({"ok": true}))],
     }))
     .await;
     let sbx = sandbox(&gw);
@@ -354,4 +355,13 @@ async fn a_dropped_code_run_interrupts_the_kernel() {
     assert_eq!(calls.len(), 2, "{:?}", methods(&gw.calls));
     assert_eq!(calls[1].0, "code.interrupt");
     assert_eq!(calls[1].1["contextId"], "k1");
+    // Today's guests do not know code.interrupt: that must not tear the channel down or surface anywhere.
+    assert!(
+        sbx.connected(),
+        "the unknown-method reply tore the channel down"
+    );
+    sbx.files()
+        .mkdir("/still-works")
+        .await
+        .expect("the channel is unusable after a cancelled code.run");
 }
