@@ -92,6 +92,8 @@ impl CommandHandle {
     ) -> Result<CommandResult, SolariError> {
         let mut stdout = String::new();
         let mut stderr = String::new();
+        let mut out_dec = Utf8Stream::default();
+        let mut err_dec = Utf8Stream::default();
         loop {
             let next = match deadline {
                 Some(d) => match tokio::time::timeout_at(d, self.rx.recv()).await {
@@ -99,7 +101,7 @@ impl CommandHandle {
                     Err(_) => {
                         let _ = self.kill(Some(9)).await;
                         self.channel.unregister_command(&self.cmd_id);
-                        return Ok(CommandResult { exit_code: -1, stdout, stderr });
+                        return Ok(CommandResult { exit_code: -1, stdout, stderr, timed_out: true });
                     }
                 },
                 None => self.rx.recv().await,
@@ -107,12 +109,11 @@ impl CommandHandle {
             let Some(frame) = next else { break };
             match frame.typ.as_str() {
                 "cmd.data" => {
-                    let text = frame
-                        .base64
-                        .as_ref()
-                        .map(|b| decode_text(b))
-                        .unwrap_or_default();
                     let is_err = frame.stream.as_deref() == Some("stderr");
+                    // One streaming decoder per stream: a multi-byte character split across two frames must come out
+                    // whole, not as U+FFFD at each end.
+                    let bytes = frame.base64.as_ref().map(|b| decode_bytes(b)).unwrap_or_default();
+                    let text = if is_err { err_dec.push(&bytes) } else { out_dec.push(&bytes) };
                     if is_err {
                         stderr.push_str(&text);
                         if let Some(cb) = &self.on_stderr {
@@ -128,7 +129,22 @@ impl CommandHandle {
                 "cmd.exit" => {
                     let exit_code = frame.exit_code.unwrap_or(0);
                     self.channel.unregister_command(&self.cmd_id);
-                    return Ok(CommandResult { exit_code, stdout, stderr });
+                    // Bytes held back at the end of a stream (a truncated character) are flushed, not dropped.
+                    let rest = out_dec.finish();
+                    if !rest.is_empty() {
+                        stdout.push_str(&rest);
+                        if let Some(cb) = &self.on_stdout {
+                            cb(&rest);
+                        }
+                    }
+                    let rest = err_dec.finish();
+                    if !rest.is_empty() {
+                        stderr.push_str(&rest);
+                        if let Some(cb) = &self.on_stderr {
+                            cb(&rest);
+                        }
+                    }
+                    return Ok(CommandResult { exit_code, stdout, stderr, timed_out: false });
                 }
                 _ => {}
             }
@@ -138,10 +154,84 @@ impl CommandHandle {
     }
 }
 
-fn decode_text(b64: &str) -> String {
-    match base64::engine::general_purpose::STANDARD.decode(b64) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        Err(_) => String::new(),
+fn decode_bytes(b64: &str) -> Vec<u8> {
+    base64::engine::general_purpose::STANDARD.decode(b64).unwrap_or_default()
+}
+
+/// Streaming UTF-8 decoder: holds back an incomplete character at the end of a chunk until the next chunk completes it.
+/// Invalid bytes become U+FFFD, as `String::from_utf8_lossy` does.
+#[derive(Default)]
+pub(crate) struct Utf8Stream {
+    pending: Vec<u8>,
+}
+
+impl Utf8Stream {
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> String {
+        self.pending.extend_from_slice(bytes);
+        let mut out = String::new();
+        loop {
+            match std::str::from_utf8(&self.pending) {
+                Ok(s) => {
+                    out.push_str(s);
+                    self.pending.clear();
+                    break;
+                }
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    out.push_str(std::str::from_utf8(&self.pending[..valid]).unwrap_or(""));
+                    match e.error_len() {
+                        Some(n) => {
+                            out.push('\u{FFFD}');
+                            self.pending.drain(..valid + n);
+                        }
+                        None => {
+                            // An incomplete character at the end: wait for the next chunk.
+                            self.pending.drain(..valid);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// End of stream: a character still incomplete is reported once as U+FFFD.
+    pub(crate) fn finish(&mut self) -> String {
+        if self.pending.is_empty() {
+            String::new()
+        } else {
+            self.pending.clear();
+            "\u{FFFD}".to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod utf8_tests {
+    use super::Utf8Stream;
+
+    #[test]
+    fn characters_split_across_chunks_come_out_whole() {
+        let text = "漢字🙂é".repeat(50);
+        let mut dec = Utf8Stream::default();
+        let mut out = String::new();
+        for b in text.as_bytes() {
+            out.push_str(&dec.push(&[*b]));
+        }
+        out.push_str(&dec.finish());
+        assert_eq!(out, text);
+        assert!(!out.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn a_truncated_character_at_the_end_is_reported_once_and_invalid_bytes_are_replaced() {
+        let mut dec = Utf8Stream::default();
+        assert_eq!(dec.push(b"ok\xe6"), "ok");
+        assert_eq!(dec.finish(), "\u{FFFD}");
+        let mut dec = Utf8Stream::default();
+        assert_eq!(dec.push(b"a\xffb"), "a\u{FFFD}b");
+        assert_eq!(dec.finish(), "");
     }
 }
 
@@ -225,6 +315,7 @@ pub(crate) async fn run_command(
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
+            timed_out: false,
         });
     }
     // `timeout_ms` is a deadline for the command here too (it used to be honoured only by the REST path).

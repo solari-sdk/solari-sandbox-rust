@@ -192,6 +192,7 @@ impl Client {
             control_url,
             expires_at: view.expires_at,
             stream_url,
+            recording_url: None,
         };
         Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)
     }
@@ -308,6 +309,7 @@ pub struct Sandbox {
     kind: String,
     control_url: String,
     stream_url: Option<String>,
+    recording_url: Option<String>,
     expires_at: String,
     http: Arc<HttpTransport>,
     channel: Arc<ControlChannel>,
@@ -339,6 +341,7 @@ impl Sandbox {
             kind: resp.kind,
             control_url: resp.control_url,
             stream_url: resp.stream_url,
+            recording_url: resp.recording_url,
             expires_at: resp.expires_at,
             http,
             channel: Arc::new(channel),
@@ -361,6 +364,10 @@ impl Sandbox {
     /// has no display, so the gateway omits it.
     pub fn stream_url(&self) -> Option<&str> {
         self.stream_url.as_deref()
+    }
+    /// The session recording link, when the create asked for a recording.
+    pub fn recording_url(&self) -> Option<&str> {
+        self.recording_url.as_deref()
     }
     /// ISO-8601 expiry timestamp.
     pub fn expires_at(&self) -> &str {
@@ -512,10 +519,20 @@ impl GitRunner for Sandbox {
         args: Vec<String>,
         cwd: Option<String>,
     ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
+        self.run_git_env(args, cwd, None)
+    }
+
+    fn run_git_env<'a>(
+        &'a self,
+        args: Vec<String>,
+        cwd: Option<String>,
+        env: Option<std::collections::HashMap<String, String>>,
+    ) -> Pin<Box<dyn Future<Output = Result<CommandResult, SolariError>> + Send + 'a>> {
         Box::pin(async move {
             let opts = RunOptions {
                 args: Some(args),
                 cwd,
+                env,
                 ..Default::default()
             };
             run_command(self, "git", &opts).await

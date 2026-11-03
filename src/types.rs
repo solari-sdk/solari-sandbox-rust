@@ -135,6 +135,9 @@ pub struct CreateSandboxResponse {
     /// Present for desktops only; ignored on the sandbox core surface.
     #[serde(default)]
     pub stream_url: Option<String>,
+    /// The session recording link, when the create asked for a recording.
+    #[serde(default)]
+    pub recording_url: Option<String>,
 }
 
 /// `GET /sandboxes/:id` response (subset used by `connect`).
@@ -180,6 +183,9 @@ pub struct CommandResult {
     pub stdout: String,
     #[serde(default)]
     pub stderr: String,
+    /// True when the command hit its `timeout_ms` and was killed (`exit_code` is -1 then).
+    #[serde(default)]
+    pub timed_out: bool,
 }
 
 // ---------------------------------------------------------------------------
