@@ -91,7 +91,7 @@ pub(crate) fn map_gateway_error(status: u16, body: Option<GatewayErrorBody>) -> 
     let message = body
         .as_ref()
         .and_then(|b| b.message.clone().or_else(|| b.error.clone()).or_else(|| b.code.clone()))
-        .unwrap_or_else(|| format!("Gateway request failed with status {status}"));
+        .unwrap_or_else(|| default_gateway_message(status));
     // `code` is the discriminator (PROTOCOL.md section 4); the status alone is not enough because one status carries
     // several meanings. A response with no code keeps the type its status has always had.
     match (status, code.as_deref()) {
@@ -108,14 +108,41 @@ pub(crate) fn map_gateway_error(status: u16, body: Option<GatewayErrorBody>) -> 
 /// True when an error means the one-shot `/exec` route is not served (an older
 /// gateway) — the only case where `run` retries over the control WS. A real
 /// host/command failure is NOT route-unavailable and must propagate. Mirrors
-/// `isRouteUnavailable` (GatewayError with status 404/405/501).
+/// `isRouteUnavailable` (GatewayError with status 404/405/501), except that a 404 only counts when it is not a
+/// gateway answer: a missing route comes back as a plain-text "404 Not Found" (no JSON body, so the message is the
+/// default one), while a deleted or unknown sandbox comes back as JSON (`{"error":"Not found"}`). The latter must
+/// propagate, or the fallback hides it behind "not connected".
 pub(crate) fn is_route_unavailable(err: &SolariError) -> bool {
-    matches!(err.status(), Some(404) | Some(405) | Some(501))
+    match err {
+        SolariError::Gateway { status: 404, message, code: None } => *message == default_gateway_message(404),
+        _ => matches!(err.status(), Some(405) | Some(501)),
+    }
+}
+
+fn default_gateway_message(status: u16) -> String {
+    format!("Gateway request failed with status {status}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A 404 from /exec is "route not served" only when it is not a gateway answer: a deleted sandbox is a JSON 404
+    // and must reach the caller instead of falling back to the control channel ("not connected").
+    #[test]
+    fn route_unavailable_is_not_a_json_404() {
+        let plain_404 = map_gateway_error(404, None);
+        let json_404 = map_gateway_error(
+            404,
+            Some(GatewayErrorBody { error: Some("Not found".into()), ..Default::default() }),
+        );
+        assert!(is_route_unavailable(&plain_404), "a plain-text 404 means no such route");
+        assert!(!is_route_unavailable(&json_404), "a JSON 404 means the sandbox is gone");
+        assert!(is_route_unavailable(&map_gateway_error(405, None)));
+        assert!(is_route_unavailable(&map_gateway_error(501, None)));
+        assert!(!is_route_unavailable(&map_gateway_error(500, None)));
+        assert!(!is_route_unavailable(&SolariError::Other("x".into())));
+    }
 
     #[derive(Debug, PartialEq)]
     enum Kind {

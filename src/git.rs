@@ -503,6 +503,7 @@ mod tests {
                 exit_code: 0,
                 stdout: stdout.to_string(),
                 stderr: String::new(),
+                timed_out: false,
             }
         }
     }
@@ -736,6 +737,7 @@ mod tests {
             exit_code: 128,
             stdout: String::new(),
             stderr: "fatal: unable to access: hunter2 rejected".into(),
+            timed_out: false,
         });
         let err = Git::new(&stub2)
             .clone(
@@ -832,6 +834,7 @@ mod tests {
             exit_code: 128,
             stdout: String::new(),
             stderr: "fatal: not a git repository".into(),
+            timed_out: false,
         });
         let git = Git::new(&stub);
         let err = git.status(Some("/nope")).await.unwrap_err();

@@ -101,6 +101,7 @@ mod tests {
             control_url: format!("ws://127.0.0.1:{ws_port}/control/sb"),
             expires_at: "".into(),
             stream_url: None,
+            recording_url: None,
         };
         let sbx = Sandbox::from_response(
             Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
@@ -157,6 +158,7 @@ mod tests {
             control_url: format!("ws://127.0.0.1:{ws_port}/control/sb"),
             expires_at: "".into(),
             stream_url: None,
+            recording_url: None,
         };
         let sbx = Sandbox::from_response(
             Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
@@ -216,6 +218,7 @@ mod tests {
             control_url: format!("ws://127.0.0.1:{ws_port}/control/sb"),
             expires_at: "".into(),
             stream_url: None,
+            recording_url: None,
         };
         let sbx = Sandbox::from_response(
             Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
@@ -402,6 +405,25 @@ mod tests {
         None
     }
 
+    // The recording link from a create that asked for one reaches the handle (it used to be discarded), and the
+    // one-shot result keeps `timedOut`.
+    #[tokio::test]
+    async fn recording_url_and_timed_out_are_kept() {
+        let resp: CreateSandboxResponse = serde_json::from_str(
+            r#"{"sandboxId":"sbx_r","kind":"desktop","controlUrl":"ws://x/control/sbx_r","expiresAt":"","recordingUrl":"https://rec.example/r/1"}"#,
+        )
+        .unwrap();
+        let http = Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap());
+        let sbx = Sandbox::from_response(http, resp, Some(5000)).unwrap();
+        assert_eq!(sbx.recording_url(), Some("https://rec.example/r/1"));
+
+        let r: crate::types::CommandResult =
+            serde_json::from_str(r#"{"exitCode":-1,"stdout":"","stderr":"","timedOut":true}"#).unwrap();
+        assert!(r.timed_out && r.exit_code == -1);
+        let ok: crate::types::CommandResult = serde_json::from_str(r#"{"exitCode":0,"stdout":"x","stderr":""}"#).unwrap();
+        assert!(!ok.timed_out);
+    }
+
     // A blank id builds a nearly-right "/sandboxes//exec" (double slash), so it
     // is rejected where it enters: Other for a blank id in a response (our
     // side), Validation for a blank id the caller passed to connect().
@@ -413,6 +435,7 @@ mod tests {
             control_url: "ws://127.0.0.1:1/control/".into(),
             expires_at: "".into(),
             stream_url: None,
+            recording_url: None,
         };
         let http = Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap());
         match Sandbox::from_response(http, resp, Some(5000)) {

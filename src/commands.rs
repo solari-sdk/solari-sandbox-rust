@@ -101,7 +101,7 @@ impl CommandHandle {
                     Err(_) => {
                         let _ = self.kill(Some(9)).await;
                         self.channel.unregister_command(&self.cmd_id);
-                        return Ok(CommandResult { exit_code: -1, stdout, stderr });
+                        return Ok(CommandResult { exit_code: -1, stdout, stderr, timed_out: true });
                     }
                 },
                 None => self.rx.recv().await,
@@ -144,7 +144,7 @@ impl CommandHandle {
                             cb(&rest);
                         }
                     }
-                    return Ok(CommandResult { exit_code, stdout, stderr });
+                    return Ok(CommandResult { exit_code, stdout, stderr, timed_out: false });
                 }
                 _ => {}
             }
@@ -315,6 +315,7 @@ pub(crate) async fn run_command(
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
+            timed_out: false,
         });
     }
     // `timeout_ms` is a deadline for the command here too (it used to be honoured only by the REST path).
