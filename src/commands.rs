@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::channel::{AsyncFrame, ControlChannel};
 use crate::client::Sandbox;
-use crate::error::{is_route_unavailable, SolariError};
+use crate::error::{is_route_unavailable, is_shared_refusal, SolariError};
 use crate::http::encode_uri_component;
 use crate::types::CommandResult;
 
@@ -361,14 +361,15 @@ pub(crate) async fn run_command(
 ) -> Result<CommandResult, SolariError> {
     // One-shot HTTP fast path: a plain run-to-completion (no streaming
     // callbacks, not backgrounded, no per-command env/user) over the warm REST
-    // connection, ONLY when the control channel isn't already open.
-    if !opts.background
+    // connection, when the control channel isn't already open. A shared sandbox
+    // refuses command streams but runs commands over REST, so once we know the
+    // sandbox is shared the REST route is the only one that works, connected or not.
+    let rest_eligible = !opts.background
         && opts.on_stdout.is_none()
         && opts.on_stderr.is_none()
         && opts.env.is_none()
-        && opts.user.is_none()
-        && !sb.channel().connected()
-    {
+        && opts.user.is_none();
+    if rest_eligible && (!sb.channel().connected() || sb.is_shared()) {
         match exec_oneshot(sb, cmd, opts).await {
             Ok(r) => return Ok(r),
             // Fall back to the WS path ONLY when `/exec` is unavailable. Any
@@ -381,7 +382,19 @@ pub(crate) async fn run_command(
         }
     }
 
-    let handle = start_command(sb, cmd, opts).await?;
+    let handle = match start_command(sb, cmd, opts).await {
+        Ok(h) => h,
+        Err(err) if is_shared_refusal(&err) => {
+            // The sandbox is shared: remember it, and run this command over REST if it can be (the refusal means
+            // nothing started, so nothing can run twice).
+            sb.mark_shared();
+            if rest_eligible {
+                return exec_oneshot(sb, cmd, opts).await;
+            }
+            return Err(err);
+        }
+        Err(err) => return Err(err),
+    };
     if opts.background {
         // Nobody awaits a background command, so something has to drive its output to the callbacks: they were never called.
         if opts.on_stdout.is_some() || opts.on_stderr.is_some() {
