@@ -395,3 +395,119 @@ async fn a_finished_code_run_sends_no_interrupt() {
         "a code run that finished must not be interrupted"
     );
 }
+
+// ---- commands.run on a connected shared sandbox -------------------------------------------------------
+
+/// A one-route HTTP gateway: every request is answered with a finished command; returns the port and the request counter.
+async fn exec_http_gateway() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hits2 = hits.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = listener.accept().await else {
+                return;
+            };
+            let hits = hits2.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                loop {
+                    let Ok(n) = s.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    if buf[..n].windows(5).any(|w| w == b"/exec") {
+                        hits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    let body = r#"{"exitCode":0,"stdout":"hi from rest","stderr":""}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    if s.write_all(resp.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    (port, hits)
+}
+
+fn sandbox_with_http(gw: &Gateway, http_port: u16) -> Sandbox {
+    let resp = CreateSandboxResponse {
+        sandbox_id: "sb".into(),
+        kind: "sandbox".into(),
+        control_url: format!("ws://127.0.0.1:{}/control/sb", gw.port),
+        expires_at: "".into(),
+        stream_url: None,
+        recording_url: None,
+    };
+    Sandbox::from_response(
+        Arc::new(
+            HttpTransport::new(HttpOptions::new(
+                "k",
+                format!("http://127.0.0.1:{http_port}"),
+            ))
+            .unwrap(),
+        ),
+        resp,
+        Some(2000),
+    )
+    .unwrap()
+}
+
+fn shared_refusal() -> Value {
+    json!({"id": "$ID", "ok": false, "error": {"code": "NotAvailableOnSharedIsolation", "message": "cmd.start is not available on a shared context: it operates on the whole VM, not this context"}})
+}
+
+/// A shared sandbox refuses cmd.start but runs commands over REST: run() on a CONNECTED shared sandbox used to return the
+/// refusal. It falls back to REST, and remembers the sandbox is shared so later runs do not try the stream again.
+#[tokio::test]
+async fn run_on_a_connected_shared_sandbox_falls_back_to_rest() {
+    let gw = gateway(Arc::new(|method, _| match method {
+        "cmd.start" => vec![shared_refusal()],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let (http_port, hits) = exec_http_gateway().await;
+    let sbx = sandbox_with_http(&gw, http_port);
+    sbx.connect().await.unwrap();
+    for i in 0..3 {
+        let r = sbx
+            .commands()
+            .run("sh", RunOptions::new().args(["-c", "echo hi"]))
+            .await
+            .unwrap_or_else(|e| panic!("run {i}: {e}"));
+        assert_eq!((r.exit_code, r.stdout.as_str()), (0, "hi from rest"));
+    }
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let starts = methods(&gw.calls)
+        .iter()
+        .filter(|m| *m == "cmd.start")
+        .count();
+    assert_eq!(starts, 1, "the refusal is remembered: cmd.start sent once");
+}
+
+/// A run that needs a stream (an output callback) cannot be served by REST: the refusal is reported.
+#[tokio::test]
+async fn a_streaming_run_on_a_shared_sandbox_reports_the_refusal() {
+    let gw = gateway(Arc::new(|method, _| match method {
+        "cmd.start" => vec![shared_refusal()],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let (http_port, hits) = exec_http_gateway().await;
+    let sbx = sandbox_with_http(&gw, http_port);
+    sbx.connect().await.unwrap();
+    let mut opts = RunOptions::new().args(["-c", "echo hi"]);
+    opts.on_stdout = Some(Arc::new(|_: &str| {}));
+    let err = sbx.commands().run("sh", opts).await.unwrap_err();
+    assert!(crate::error::is_shared_refusal(&err), "got {err}");
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+}

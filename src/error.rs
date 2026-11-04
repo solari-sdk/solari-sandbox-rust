@@ -119,6 +119,17 @@ pub(crate) fn is_route_unavailable(err: &SolariError) -> bool {
     }
 }
 
+/// The gateway refusing a command stream because the sandbox is on the shared isolation tier.
+pub(crate) fn is_shared_refusal(err: &SolariError) -> bool {
+    match err {
+        SolariError::Action { code: Some(c), .. } if c == "NotAvailableOnSharedIsolation" => true,
+        other => {
+            let m = other.to_string();
+            m.contains("NotAvailableOnSharedIsolation") || m.contains("not available on a shared")
+        }
+    }
+}
+
 fn default_gateway_message(status: u16) -> String {
     format!("Gateway request failed with status {status}")
 }

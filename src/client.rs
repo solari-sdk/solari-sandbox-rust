@@ -313,6 +313,8 @@ pub struct Sandbox {
     expires_at: String,
     http: Arc<HttpTransport>,
     channel: Arc<ControlChannel>,
+    /// The gateway refused a command stream: this sandbox is on the shared tier (commands then run over REST).
+    shared: std::sync::atomic::AtomicBool,
 }
 
 impl Sandbox {
@@ -345,7 +347,17 @@ impl Sandbox {
             expires_at: resp.expires_at,
             http,
             channel: Arc::new(channel),
+            shared: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    pub(crate) fn is_shared(&self) -> bool {
+        self.shared.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn mark_shared(&self) {
+        self.shared
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// The session id.
