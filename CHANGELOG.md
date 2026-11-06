@@ -46,7 +46,7 @@
 ### Fixed
 - **Dropping a `Sandbox` closes its socket.** `ControlChannel` had no `Drop`: the reader task kept the channel state alive, the state kept the writer's sender alive, and the writer task waited on it, so the socket and both tasks ran until the server hung up.
 - **`background: true` delivers output to `on_stdout` / `on_stderr`.** Nothing drove the command's output once `run` returned, so the callbacks were never called.
-- **Dropping a `commands().run` future (or a `tokio::time::timeout` around it) stops the guest process.** It gets SIGTERM and a closed stdin at once and SIGKILL 2 s later; before, it ran on. Dropping a `code().run` future asks the guest to interrupt the kernel (`code.interrupt`; a guest that does not know it is ignored). The one-shot `/exec` path needs nothing: the gateway kills the process when the request goes away.
+- **Dropping a `commands().run` future (or a `tokio::time::timeout` around it) stops the guest process.** It gets SIGTERM and a closed stdin at once and SIGKILL 2 s later; before, it ran on. Dropping a `code().run` future asks the guest to interrupt the kernel (`code.interrupt`; a guest that does not know it is ignored). A command on the one-shot `/exec` route is not stopped by dropping the call (that route has no command id to signal).
 
 ## 0.3.2
 
