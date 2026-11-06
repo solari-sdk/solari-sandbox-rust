@@ -201,9 +201,11 @@ pub struct CommandResult {
     /// The gateway's exact-bytes fields on the `/exec` answer (`stdoutBase64` / `stderrBase64`, sent only when the text is lossy).
     /// Read into `stdout_bytes` / `stderr_bytes` and cleared; never serialized.
     #[serde(default, rename = "stdoutBase64", skip_serializing)]
-    pub(crate) stdout_base64: Option<String>,
+    #[doc(hidden)]
+    pub stdout_base64: Option<String>,
     #[serde(default, rename = "stderrBase64", skip_serializing)]
-    pub(crate) stderr_base64: Option<String>,
+    #[doc(hidden)]
+    pub stderr_base64: Option<String>,
     /// The exact stderr bytes; see `stdout_bytes`.
     #[serde(skip)]
     pub stderr_bytes: Vec<u8>,
