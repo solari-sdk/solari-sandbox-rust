@@ -1,12 +1,1 @@
-[
-  {
-    "id": "errors/409-not-stopped",
-    "why": "the Rust SDK has no NotStopped error class: a 409 NotStopped is a plain Gateway error",
-    "closes": "add a NotStopped variant mapped from 409 NotStopped and StartInProgress in the gateway error mapping, then delete this entry"
-  },
-  {
-    "id": "errors/409-start-in-progress",
-    "why": "the Rust SDK has no NotStopped error class: a 409 StartInProgress is a plain Gateway error",
-    "closes": "same change as errors/409-not-stopped"
-  }
-]
+[]

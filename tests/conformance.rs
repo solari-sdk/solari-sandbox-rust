@@ -100,6 +100,7 @@ fn normalize_error(e: &SolariError) -> Value {
         SolariError::Plan { status, code, .. } => ("plan", Some(*status), code.clone()),
         SolariError::ConcurrencyLimit { status, code, .. } => ("concurrency_limit", Some(*status), code.clone()),
         SolariError::NoCapacity { status, code, .. } => ("no_capacity", Some(*status), code.clone()),
+        SolariError::SandboxNotStopped { status, code, .. } => ("not_stopped", Some(*status), code.clone()),
         SolariError::Gateway { status, code, .. } => ("gateway", Some(*status), code.clone()),
         _ => ("other", None, None),
     };

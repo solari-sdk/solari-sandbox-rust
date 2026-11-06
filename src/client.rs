@@ -273,7 +273,7 @@ impl Client {
     /// billing segment. Idempotent: an already-running sandbox answers 200 and its
     /// current control URL.
     ///
-    /// Any other state is refused with `SolariError::Gateway { status: 409, code }`
+    /// Any other state is refused with `SolariError::SandboxNotStopped { status: 409, code, state }`
     /// where `code` is `NotStopped` (use [`Client::resume`] for a paused one) or
     /// `StartInProgress`. A stopped disk that cannot be started answers 409 with
     /// its code (`StoppedDiskMissing`, `StoppedDiskUnsafe`, `GoldenMismatch`,

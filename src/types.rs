@@ -167,6 +167,9 @@ pub struct GatewayErrorBody {
     pub message: Option<String>,
     #[serde(default)]
     pub retryable: Option<bool>,
+    /// The sandbox's current state, sent with a 409 `NotStopped`.
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
