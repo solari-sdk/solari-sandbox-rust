@@ -1,0 +1,148 @@
+{
+  "comment": "Real gateway error responses by id, as the desktop gateway emits them (gateway/src, see sdk/PROTOCOL.md section 4). Rows are plain { status, code?, retryable?, error? }; reference one from a mock as `\"reply\": \"gateway:<id>\"` or anywhere as `{ \"$ref\": \"gateway:<id>\" }` (see lib/spec.mjs). Layers above (compat error mapping) can point at the same ids.",
+  "responses": [
+    {
+      "id": "unauthorized-401",
+      "status": 401,
+      "code": "Unauthorized"
+    },
+    {
+      "id": "featureRequiresPlan-402",
+      "status": 402,
+      "code": "FeatureRequiresPlan"
+    },
+    {
+      "id": "insufficientCredit-402",
+      "status": 402,
+      "code": "InsufficientCredit"
+    },
+    {
+      "id": "forbidden-403",
+      "status": 403,
+      "code": "Forbidden"
+    },
+    {
+      "id": "notEntitled-403",
+      "status": 403,
+      "code": "NotEntitled"
+    },
+    {
+      "id": "notFound-404",
+      "status": 404,
+      "code": "NotFound"
+    },
+    {
+      "id": "notStopped-409",
+      "status": 409,
+      "code": "NotStopped"
+    },
+    {
+      "id": "sandboxPaused-409",
+      "status": 409,
+      "code": "SandboxPaused"
+    },
+    {
+      "id": "sandboxStopped-409",
+      "status": 409,
+      "code": "SandboxStopped"
+    },
+    {
+      "id": "startInProgress-409",
+      "status": 409,
+      "code": "StartInProgress"
+    },
+    {
+      "id": "sandboxGone-410",
+      "status": 410,
+      "code": "SandboxGone"
+    },
+    {
+      "id": "concurrencyLimit-429",
+      "status": 429,
+      "code": "ConcurrencyLimitExceeded"
+    },
+    {
+      "id": "noCode-429",
+      "status": 429
+    },
+    {
+      "id": "objectLimit-429",
+      "status": 429,
+      "code": "ObjectLimit"
+    },
+    {
+      "id": "tooManyExecutions-429",
+      "status": 429,
+      "code": "TooManyExecutions",
+      "retryable": true
+    },
+    {
+      "id": "internal-500",
+      "status": 500,
+      "code": "InternalError"
+    },
+    {
+      "id": "startFailed-500",
+      "status": 500,
+      "code": "StartFailed",
+      "retryable": false
+    },
+    {
+      "id": "notImplemented-501",
+      "status": 501,
+      "code": "NotSupported"
+    },
+    {
+      "id": "startHostError-502",
+      "status": 502,
+      "code": "StartHostError",
+      "retryable": true
+    },
+    {
+      "id": "admissionUnavailable-503",
+      "status": 503,
+      "code": "AdmissionUnavailable"
+    },
+    {
+      "id": "dependencyUnavailable-503",
+      "status": 503,
+      "code": "DependencyUnavailable"
+    },
+    {
+      "id": "noCapacity-503",
+      "status": 503,
+      "code": "NoCapacity",
+      "retryable": true
+    },
+    {
+      "id": "noCode-503",
+      "status": 503
+    },
+    {
+      "id": "sandboxUnavailable-503",
+      "status": 503,
+      "code": "SandboxUnavailable"
+    },
+    {
+      "id": "startTimeout-503",
+      "status": 503,
+      "code": "StartTimeout",
+      "retryable": true
+    },
+    {
+      "id": "storeUnavailable-503",
+      "status": 503,
+      "code": "StoreUnavailable"
+    },
+    {
+      "id": "gatewayTimeout-504",
+      "status": 504
+    },
+    {
+      "id": "insufficientCapacity-507",
+      "status": 507,
+      "code": "InsufficientCapacity",
+      "retryable": true
+    }
+  ]
+}

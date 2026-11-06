@@ -1,0 +1,90 @@
+[
+  {
+    "op": "desktop.attach",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "desktop.connect",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "desktop.create",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "desktop.destroy",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "desktop.get",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "desktop.pause",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "desktop.resume",
+    "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
+  },
+  {
+    "op": "sandbox.list",
+    "why": "the Rust SDK has no list or paging call for sandboxes"
+  },
+  {
+    "op": "sandbox.listAll",
+    "why": "the Rust SDK has no list or paging call for sandboxes"
+  },
+  {
+    "op": "sandbox.park",
+    "why": "the Rust SDK has no park call"
+  },
+  {
+    "op": "sandbox.setTimeout",
+    "why": "the Rust SDK has no setTimeout call"
+  },
+  {
+    "op": "sandbox.unpark",
+    "why": "the Rust SDK has no unpark call"
+  },
+  {
+    "op": "snapshot.delete",
+    "why": "the Rust SDK has no snapshot methods (list, get, delete, promote)"
+  },
+  {
+    "op": "snapshot.get",
+    "why": "the Rust SDK has no snapshot methods (list, get, delete, promote)"
+  },
+  {
+    "op": "snapshot.list",
+    "why": "the Rust SDK has no snapshot methods (list, get, delete, promote)"
+  },
+  {
+    "op": "snapshot.promote",
+    "why": "the Rust SDK has no snapshot methods (list, get, delete, promote)"
+  },
+  {
+    "op": "template.build",
+    "why": "the Rust SDK has no template client (build, list, get, delete, waitUntilReady)"
+  },
+  {
+    "op": "template.buildRaw",
+    "why": "the Rust SDK has no template client (build, list, get, delete, waitUntilReady)"
+  },
+  {
+    "op": "template.delete",
+    "why": "the Rust SDK has no template client (build, list, get, delete, waitUntilReady)"
+  },
+  {
+    "op": "template.get",
+    "why": "the Rust SDK has no template client (build, list, get, delete, waitUntilReady)"
+  },
+  {
+    "op": "template.list",
+    "why": "the Rust SDK has no template client (build, list, get, delete, waitUntilReady)"
+  },
+  {
+    "op": "template.waitUntilReady",
+    "why": "the Rust SDK has no template client (build, list, get, delete, waitUntilReady)"
+  }
+]

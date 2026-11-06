@@ -1,0 +1,1723 @@
+{
+  "comment": "The 7 core ops of sdk/PROTOCOL.md section 1.1 as scripted exchanges. Request bodies are the maximal create from tests/sdk/ts-request-fixtures.json (every create field), headers per PROTOCOL.md. $MOCK_WS in a reply is replaced by the mock's ws:// origin. Written to match the gateway, not generated from an SDK from now on.",
+  "wire": [
+    {
+      "id": "create-sandbox-maximal",
+      "op": "sandbox.create",
+      "input": {
+        "template": "base",
+        "cpu": 2,
+        "memMb": 2048,
+        "diskGb": 10,
+        "envs": {
+          "FOO": "bar"
+        },
+        "metadata": {
+          "proj": "alpha"
+        },
+        "timeoutMs": 600000,
+        "ttlSeconds": 3600,
+        "fromSnapshot": "snap_seed",
+        "isolation": "dedicated",
+        "lifecycle": {
+          "onTimeout": "pause",
+          "autoResume": true,
+          "parkAfterMs": 30000,
+          "parkMaxMs": 20000,
+          "hibernateAfterParkedMs": 90000,
+          "checkpointEveryMs": 300000
+        },
+        "volumes": [
+          {
+            "volumeId": "vol_data",
+            "path": "/data"
+          }
+        ]
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json",
+              "idempotency-key": "<uuid>"
+            },
+            "body": {
+              "template": "base",
+              "kind": "sandbox",
+              "cpu": 2,
+              "memMb": 2048,
+              "diskGb": 10,
+              "envs": {
+                "FOO": "bar"
+              },
+              "metadata": {
+                "proj": "alpha"
+              },
+              "timeoutMs": 600000,
+              "ttlSeconds": 3600,
+              "fromSnapshot": "snap_seed",
+              "isolation": "dedicated",
+              "lifecycle": {
+                "onTimeout": "pause",
+                "autoResume": true,
+                "parkAfterMs": 30000,
+                "parkMaxMs": 20000,
+                "hibernateAfterParkedMs": 90000,
+                "checkpointEveryMs": 300000
+              },
+              "volumes": [
+                {
+                  "volumeId": "vol_data",
+                  "path": "/data"
+                }
+              ]
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "create-desktop-maximal",
+      "op": "sandbox.createDesktop",
+      "input": {
+        "template": "default",
+        "cpu": 2,
+        "memMb": 2048,
+        "diskGb": 10,
+        "envs": {
+          "FOO": "bar"
+        },
+        "metadata": {
+          "proj": "alpha"
+        },
+        "timeoutMs": 600000,
+        "ttlSeconds": 3600,
+        "fromSnapshot": "snap_seed",
+        "isolation": "hardened",
+        "lifecycle": {
+          "onTimeout": "pause",
+          "autoResume": true,
+          "parkAfterMs": 30000,
+          "parkMaxMs": 20000,
+          "hibernateAfterParkedMs": 90000,
+          "checkpointEveryMs": 300000
+        },
+        "resolution": "1280x720",
+        "record": true,
+        "volumes": [
+          {
+            "volumeId": "vol_data",
+            "path": "/data"
+          }
+        ]
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json",
+              "idempotency-key": "<uuid>"
+            },
+            "body": {
+              "template": "default",
+              "kind": "desktop",
+              "cpu": 2,
+              "memMb": 2048,
+              "diskGb": 10,
+              "envs": {
+                "FOO": "bar"
+              },
+              "metadata": {
+                "proj": "alpha"
+              },
+              "timeoutMs": 600000,
+              "ttlSeconds": 3600,
+              "fromSnapshot": "snap_seed",
+              "isolation": "hardened",
+              "lifecycle": {
+                "onTimeout": "pause",
+                "autoResume": true,
+                "parkAfterMs": 30000,
+                "parkMaxMs": 20000,
+                "hibernateAfterParkedMs": 90000,
+                "checkpointEveryMs": 300000
+              },
+              "resolution": "1280x720",
+              "record": true,
+              "volumes": [
+                {
+                  "volumeId": "vol_data",
+                  "path": "/data"
+                }
+              ]
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "desktop",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z",
+              "streamUrl": "$MOCK_WS/stream/pool-a%3Avm-7%3Aorg-42.sig"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "get",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "expiresAt": "2030-01-01T00:00:00Z",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig",
+          "state": "running"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "pause",
+      "op": "sandbox.pause",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/pause",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "state": "paused"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "id": "resume",
+      "op": "sandbox.resume",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/resume",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "state": "running"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "id": "start",
+      "op": "sandbox.start",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/start",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "state": "running"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "id": "kill",
+      "op": "sandbox.kill",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "DELETE",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "ok": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "id": "list-sandboxes-filters",
+      "op": "sandbox.list",
+      "input": {
+        "metadata": {
+          "proj": "alpha"
+        },
+        "state": "running",
+        "kind": "sandbox",
+        "limit": 20,
+        "cursor": "c 1/="
+      },
+      "why": "metadata filters go as metadata.<key>; compared on the decoded query so encoding never matters",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null,
+            "query": {
+              "metadata.proj": "alpha",
+              "state": "running",
+              "kind": "sandbox",
+              "limit": "20",
+              "cursor": "c 1/="
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxes": [
+                {
+                  "sandboxId": "sbx_1",
+                  "kind": "sandbox",
+                  "state": "running",
+                  "metadata": {},
+                  "template": "base",
+                  "createdAt": "2030-01-01T00:00:00Z",
+                  "expiresAt": "2030-01-01T01:00:00Z",
+                  "cpu": 2,
+                  "memMb": 2048
+                }
+              ],
+              "nextCursor": "c2"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxIds": [
+            "sbx_1"
+          ],
+          "nextCursor": "c2"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "list-sandboxes-no-filters",
+      "op": "sandbox.list",
+      "input": {},
+      "why": "no filter means no query string at all",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxes": []
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxIds": []
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "list-snapshots-filters",
+      "op": "snapshot.list",
+      "input": {
+        "template": "base",
+        "kind": "sandbox",
+        "limit": 5,
+        "cursor": "s1",
+        "sandboxId": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/snapshots",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null,
+            "query": {
+              "template": "base",
+              "kind": "sandbox",
+              "limit": "5",
+              "cursor": "s1",
+              "sandboxId": "pool-a:vm-7:org-42.sig"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "snapshots": [
+                {
+                  "id": "snap_1",
+                  "parent": null,
+                  "name": null,
+                  "sizeBytes": 1,
+                  "createdAt": "2030-01-01T00:00:00Z",
+                  "template": "base",
+                  "kind": "sandbox"
+                }
+              ],
+              "nextCursor": "s2"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "snapshotIds": [
+            "snap_1"
+          ],
+          "nextCursor": "s2"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "get-snapshot",
+      "op": "snapshot.get",
+      "input": {
+        "id": "snap:1/x"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/snapshots/snap%3A1%2Fx",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "kind": "sandbox",
+              "id": "snap:1/x",
+              "parent": null,
+              "name": null,
+              "sizeBytes": 1,
+              "createdAt": "2030-01-01T00:00:00Z",
+              "template": "base"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "snapshotId": "snap:1/x"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "delete-snapshot",
+      "op": "snapshot.delete",
+      "input": {
+        "id": "snap:1/x"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "DELETE",
+            "path": "/snapshots/snap%3A1%2Fx",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "ok": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 1
+      }
+    },
+    {
+      "id": "promote-snapshot",
+      "op": "snapshot.promote",
+      "input": {
+        "id": "snap:1/x",
+        "name": "my-tpl"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/snapshots/snap%3A1%2Fx/promote",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": {
+              "name": "my-tpl"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "my-tpl"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "templateId": "tpl_1",
+          "name": "my-tpl"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "park",
+      "op": "sandbox.park",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/park",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "state": "parked"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "id": "unpark",
+      "op": "sandbox.unpark",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/unpark",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "state": "running"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "id": "set-timeout",
+      "op": "sandbox.setTimeout",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig",
+        "timeoutMs": 90000
+      },
+      "why": "runs on a handle from a first create, as every SDK does",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/timeout",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": {
+              "timeoutMs": 90000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "expiresAt": "2030-01-01T00:10:00Z"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "expiresAt": "2030-01-01T00:10:00Z"
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "connect",
+      "op": "sandbox.connect",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "connect is one GET (id escaped like encodeURIComponent); the control URL is derived, no websocket opens here",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "expiresAt": "2030-01-01T00:00:00Z",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "list-all-follows-cursor",
+      "op": "sandbox.listAll",
+      "input": {
+        "state": "running",
+        "limit": 2
+      },
+      "why": "every page repeats the filters, the second carries the first page's nextCursor, the walk stops when nextCursor is absent",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null,
+            "query": {
+              "state": "running",
+              "limit": "2"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxes": [
+                {
+                  "sandboxId": "sbx_1",
+                  "kind": "sandbox",
+                  "state": "running",
+                  "metadata": {},
+                  "template": "base",
+                  "createdAt": "2030-01-01T00:00:00Z",
+                  "expiresAt": "2030-01-01T01:00:00Z",
+                  "cpu": 2,
+                  "memMb": 2048
+                },
+                {
+                  "sandboxId": "sbx_2",
+                  "kind": "sandbox",
+                  "state": "running",
+                  "metadata": {},
+                  "template": "base",
+                  "createdAt": "2030-01-01T00:00:00Z",
+                  "expiresAt": "2030-01-01T01:00:00Z",
+                  "cpu": 2,
+                  "memMb": 2048
+                }
+              ],
+              "nextCursor": "c2"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null,
+            "query": {
+              "state": "running",
+              "limit": "2",
+              "cursor": "c2"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxes": [
+                {
+                  "sandboxId": "sbx_3",
+                  "kind": "sandbox",
+                  "state": "running",
+                  "metadata": {},
+                  "template": "base",
+                  "createdAt": "2030-01-01T00:00:00Z",
+                  "expiresAt": "2030-01-01T01:00:00Z",
+                  "cpu": 2,
+                  "memMb": 2048
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxIds": [
+            "sbx_1",
+            "sbx_2",
+            "sbx_3"
+          ]
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "build-raw",
+      "op": "template.buildRaw",
+      "input": {
+        "image": {
+          "base": "ubuntu:22.04",
+          "aptInstall": [
+            "ffmpeg"
+          ],
+          "kind": "sandbox"
+        },
+        "options": {
+          "name": "media",
+          "cpu": 2,
+          "memMb": 2048
+        }
+      },
+      "why": "POST /templates carries the compiled recipe and an Idempotency-Key; it does not poll",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/templates",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json",
+              "idempotency-key": "<uuid>"
+            },
+            "body": {
+              "name": "media",
+              "kind": "sandbox",
+              "cpu": 2,
+              "memMb": 2048,
+              "compiled": {
+                "kind": "sandbox",
+                "base": "ubuntu:22.04",
+                "packages": [
+                  "ffmpeg"
+                ],
+                "steps": [],
+                "fragment": "",
+                "localFiles": []
+              }
+            }
+          },
+          "reply": {
+            "status": 202,
+            "body": {
+              "buildId": "bld_1",
+              "templateId": "tpl_1"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "buildId": "bld_1",
+          "templateId": "tpl_1"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "build-polls-until-ready",
+      "op": "template.build",
+      "input": {
+        "image": {
+          "base": "ubuntu:22.04",
+          "aptInstall": [
+            "ffmpeg"
+          ],
+          "kind": "sandbox"
+        },
+        "options": {
+          "name": "media",
+          "pollIntervalMs": 5
+        }
+      },
+      "why": "build = POST then GET /templates/:id until it leaves building",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/templates",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json",
+              "idempotency-key": "<uuid>"
+            },
+            "body": {
+              "name": "media",
+              "kind": "sandbox",
+              "compiled": {
+                "kind": "sandbox",
+                "base": "ubuntu:22.04",
+                "packages": [
+                  "ffmpeg"
+                ],
+                "steps": [],
+                "fragment": "",
+                "localFiles": []
+              }
+            }
+          },
+          "reply": {
+            "status": 202,
+            "body": {
+              "buildId": "bld_1",
+              "templateId": "tpl_1"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "building",
+              "builtin": false
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "ready",
+              "builtin": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "templateId": "tpl_1",
+          "status": "ready"
+        },
+        "requests": 3
+      }
+    },
+    {
+      "id": "build-failed",
+      "op": "template.build",
+      "input": {
+        "image": {
+          "base": "ubuntu:22.04",
+          "aptInstall": [
+            "ffmpeg"
+          ],
+          "kind": "sandbox"
+        },
+        "options": {
+          "name": "media",
+          "pollIntervalMs": 5
+        }
+      },
+      "why": "a failed build surfaces as an error, not a ready template",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/templates",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json",
+              "idempotency-key": "<uuid>"
+            },
+            "body": {
+              "name": "media"
+            }
+          },
+          "reply": {
+            "status": 202,
+            "body": {
+              "buildId": "bld_1",
+              "templateId": "tpl_1"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "failed",
+              "builtin": false,
+              "error": "apt failed"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "other:SolariError"
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "wait-until-ready-timeout",
+      "op": "template.waitUntilReady",
+      "input": {
+        "id": "tpl_1",
+        "options": {
+          "name": "media",
+          "timeoutMs": 10,
+          "pollIntervalMs": 5
+        }
+      },
+      "why": "the wait is bounded by timeoutMs: polls while building, then errors",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "building",
+              "builtin": false
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "building",
+              "builtin": false
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl_1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "building",
+              "builtin": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "other:SolariError"
+        },
+        "requests": 3
+      }
+    },
+    {
+      "id": "list-templates",
+      "op": "template.list",
+      "input": {},
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templates": [
+                {
+                  "templateId": "base",
+                  "name": "base",
+                  "kind": "sandbox",
+                  "status": "ready",
+                  "builtin": true
+                },
+                {
+                  "templateId": "tpl_1",
+                  "name": "media",
+                  "kind": "sandbox",
+                  "status": "ready",
+                  "builtin": false
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "templateIds": [
+            "base",
+            "tpl_1"
+          ]
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "get-template",
+      "op": "template.get",
+      "input": {
+        "id": "tpl/1"
+      },
+      "why": "the id is path-escaped",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/templates/tpl%2F1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "templateId": "tpl/1",
+              "name": "media",
+              "kind": "sandbox",
+              "status": "ready",
+              "builtin": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "templateId": "tpl/1",
+          "status": "ready"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "delete-template",
+      "op": "template.delete",
+      "input": {
+        "id": "tpl_1"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "DELETE",
+            "path": "/templates/tpl_1",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "ok": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "requests": 1
+      }
+    },
+    {
+      "id": "create-desktop-via-desktops",
+      "op": "desktop.create",
+      "input": {
+        "template": "workstation",
+        "resolution": "1280x720",
+        "record": true,
+        "cpu": 2,
+        "memMb": 4096,
+        "ttlSeconds": 3600,
+        "metadata": {
+          "proj": "alpha"
+        }
+      },
+      "why": "DesktopClient.create is POST /desktops (not /sandboxes) with an Idempotency-Key; unset fields are absent",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/desktops",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json",
+              "idempotency-key": "<uuid>"
+            },
+            "body": {
+              "template": "workstation",
+              "resolution": "1280x720",
+              "record": true,
+              "cpu": 2,
+              "memMb": 4096,
+              "ttlSeconds": 3600,
+              "metadata": {
+                "proj": "alpha"
+              }
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "streamUrl": "$MOCK_WS/stream/pool-a%3Avm-7%3Aorg-42.sig",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z",
+              "recordingUrl": "https://rec/x"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig",
+          "recordingUrl": "https://rec/x"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "get-desktop",
+      "op": "desktop.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "status": "ready",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sessionId": "pool-a:vm-7:org-42.sig",
+          "status": "ready"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "destroy-desktop",
+      "op": "desktop.destroy",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "DELETE",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "ok": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "ok": true
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "pause-desktop",
+      "op": "desktop.pause",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig/pause",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "status": "paused"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sessionId": "pool-a:vm-7:org-42.sig",
+          "status": "paused"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "resume-desktop",
+      "op": "desktop.resume",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "resume re-uses the session id; the stream/control URLs are derived, so exactly one request",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig/resume",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "status": "ready"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "connect-desktop-running",
+      "op": "desktop.connect",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "a running session is only looked up: one GET, no resume",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "status": "ready",
+              "expiresAt": "2030-01-01T00:00:00Z",
+              "recordingUrl": "https://rec/x"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig",
+          "recordingUrl": "https://rec/x"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "connect-desktop-paused-resumes",
+      "op": "desktop.connect",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "why": "a paused session is resumed first (GET then POST /resume) and keeps its recordingUrl",
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "status": "paused",
+              "expiresAt": "2030-01-01T00:00:00Z",
+              "recordingUrl": "https://rec/x"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/desktops/pool-a%3Avm-7%3Aorg-42.sig/resume",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sessionId": "pool-a:vm-7:org-42.sig",
+              "status": "ready"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig",
+          "recordingUrl": "https://rec/x"
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "attach-desktop-makes-no-request",
+      "op": "desktop.attach",
+      "input": {
+        "session": {
+          "sessionId": "pool-a:vm-7:org-42.sig",
+          "streamUrl": "wss://x/stream",
+          "controlUrl": "wss://x/control",
+          "expiresAt": "2030-01-01T00:00:00Z"
+        }
+      },
+      "why": "attach wraps a saved create response and touches the network zero times",
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig"
+        },
+        "requests": 0
+      }
+    }
+  ]
+}
