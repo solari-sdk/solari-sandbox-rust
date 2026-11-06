@@ -232,7 +232,7 @@ async fn drain(
                     let io = CommandIo { cmd_id: cmd_id.to_string(), channel: channel.clone() };
                     let _ = io.kill(Some(9)).await;
                     channel.unregister_command(cmd_id);
-                    return Ok(CommandResult { exit_code: -1, stdout, stderr, timed_out: true, oom_killed: false, stdout_bytes: out_raw, stderr_bytes: err_raw });
+                    return Ok(CommandResult { exit_code: -1, stdout, stderr, timed_out: true, oom_killed: false, stdout_bytes: out_raw, stderr_bytes: err_raw, ..Default::default() });
                 }
             },
             None => rx.recv().await,
@@ -280,7 +280,7 @@ async fn drain(
                         cb(&rest);
                     }
                 }
-                return Ok(CommandResult { exit_code, stdout, stderr, timed_out: false, oom_killed: false, stdout_bytes: out_raw, stderr_bytes: err_raw });
+                return Ok(CommandResult { exit_code, stdout, stderr, timed_out: false, oom_killed: false, stdout_bytes: out_raw, stderr_bytes: err_raw, ..Default::default() });
             }
             _ => {}
         }
@@ -557,8 +557,13 @@ fn exec_outcome(r: Result<CommandResult, SolariError>) -> Result<CommandResult, 
             Err(SolariError::Action { method: "cmd.start".into(), message, code: Some(c) })
         }
         Ok(mut r) => {
-            r.stdout_bytes = r.stdout.clone().into_bytes();
-            r.stderr_bytes = r.stderr.clone().into_bytes();
+            // The gateway sends the exact bytes (base64) beside the text only when the text is lossy; prefer them.
+            let exact = |b64: Option<String>, text: &str| match b64.and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()) {
+                Some(bytes) => bytes,
+                None => text.as_bytes().to_vec(),
+            };
+            r.stdout_bytes = exact(r.stdout_base64.take(), &r.stdout);
+            r.stderr_bytes = exact(r.stderr_base64.take(), &r.stderr);
             Ok(r)
         }
         other => other,

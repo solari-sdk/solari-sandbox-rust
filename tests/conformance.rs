@@ -156,7 +156,11 @@ fn create_options(i: &Value) -> CreateOptions {
 }
 
 fn command_view(r: &solari::CommandResult) -> Value {
-    json!({ "exitCode": r.exit_code, "stdout": r.stdout, "stderr": r.stderr, "timedOut": r.timed_out, "oomKilled": r.oom_killed })
+    {
+        use base64::Engine;
+        json!({ "exitCode": r.exit_code, "stdout": r.stdout, "stderr": r.stderr, "timedOut": r.timed_out, "oomKilled": r.oom_killed,
+                "stdoutBase64": base64::engine::general_purpose::STANDARD.encode(&r.stdout_bytes) })
+    }
 }
 
 fn handle_view(s: &solari::Sandbox) -> Value {

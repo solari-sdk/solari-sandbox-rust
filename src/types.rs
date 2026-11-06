@@ -198,6 +198,12 @@ pub struct CommandResult {
     /// into text, so these are the bytes of that text (not recoverable from the REST answer).
     #[serde(skip)]
     pub stdout_bytes: Vec<u8>,
+    /// The gateway's exact-bytes fields on the `/exec` answer (`stdoutBase64` / `stderrBase64`, sent only when the text is lossy).
+    /// Read into `stdout_bytes` / `stderr_bytes` and cleared; never serialized.
+    #[serde(default, rename = "stdoutBase64", skip_serializing)]
+    pub(crate) stdout_base64: Option<String>,
+    #[serde(default, rename = "stderrBase64", skip_serializing)]
+    pub(crate) stderr_base64: Option<String>,
     /// The exact stderr bytes; see `stdout_bytes`.
     #[serde(skip)]
     pub stderr_bytes: Vec<u8>,
@@ -206,7 +212,7 @@ pub struct CommandResult {
 impl CommandResult {
     /// A result carrying text only: the byte fields are that text's bytes.
     pub(crate) fn from_text(exit_code: i64, stdout: String, stderr: String, timed_out: bool) -> Self {
-        CommandResult { exit_code, stdout_bytes: stdout.clone().into_bytes(), stderr_bytes: stderr.clone().into_bytes(), stdout, stderr, timed_out, oom_killed: false }
+        CommandResult { exit_code, stdout_bytes: stdout.clone().into_bytes(), stderr_bytes: stderr.clone().into_bytes(), stdout, stderr, timed_out, oom_killed: false, ..Default::default() }
     }
 }
 
