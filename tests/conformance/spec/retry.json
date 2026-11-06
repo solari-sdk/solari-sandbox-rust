@@ -1,0 +1,518 @@
+{
+  "comment": "Retry behaviour: allowlist {502,503,504,507} plus the body retryable:true hint, idempotent requests only, same Idempotency-Key on every attempt (PROTOCOL.md section 1.1).",
+  "retry": [
+    {
+      "id": "get-503-then-ok",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:noCapacity-503"
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "state": "running"
+        },
+        "requests": 2
+      },
+      "why": "GET is idempotent: a 503 is retried"
+    },
+    {
+      "id": "get-429-with-retryable-hint",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:tooManyExecutions-429"
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "state": "running"
+        },
+        "requests": 2
+      },
+      "why": "a 429 is retried only when its body says retryable:true (TooManyExecutions); the org-cap 429 is not"
+    },
+    {
+      "id": "get-429-cap-not-retried",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:concurrencyLimit-429"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "concurrency_limit",
+          "status": 429
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "tooManyExecutions-is-not-the-org-cap",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:tooManyExecutions-429",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 429,
+          "code": "TooManyExecutions"
+        },
+        "requests": 6
+      },
+      "why": "429 TooManyExecutions is a per-sandbox limit, not ConcurrencyLimitError (which says the org is at its cap)"
+    },
+    {
+      "id": "create-same-idempotency-key-on-every-attempt",
+      "op": "sandbox.create",
+      "input": {
+        "template": "base"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "headers": {
+              "idempotency-key": "<capture:key>"
+            },
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": "gateway:noCapacity-503"
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "headers": {
+              "idempotency-key": "<same:key>"
+            },
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": "gateway:noCapacity-503"
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "headers": {
+              "idempotency-key": "<same:key>"
+            },
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "sandboxId": "pool-a:vm-7:org-42.sig"
+        },
+        "requests": 3
+      },
+      "why": "a retried create must carry the SAME Idempotency-Key, or the retry can create a second sandbox"
+    },
+    {
+      "id": "create-500-not-retried",
+      "op": "sandbox.create",
+      "input": {
+        "template": "base"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "headers": {
+              "idempotency-key": "<present>"
+            },
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": "gateway:internal-500"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 500
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "get-502-then-ok",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 502,
+            "body": {
+              "error": "HTTP 502"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "state": "running"
+        },
+        "requests": 2
+      },
+      "why": "502 is on the status allowlist: retried with NO retryable hint in the body (so dropping it from the allowlist is caught)"
+    },
+    {
+      "id": "get-504-then-ok",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 504,
+            "body": {
+              "error": "HTTP 504"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "state": "running"
+        },
+        "requests": 2
+      },
+      "why": "504 is on the status allowlist: retried with NO retryable hint in the body (so dropping it from the allowlist is caught)"
+    },
+    {
+      "id": "get-507-then-ok",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 507,
+            "body": {
+              "error": "HTTP 507"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "state": "running"
+        },
+        "requests": 2
+      },
+      "why": "507 is on the status allowlist: retried with NO retryable hint in the body (so dropping it from the allowlist is caught)"
+    },
+    {
+      "id": "get-network-drop-then-ok",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "drop": true
+          }
+        },
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "metadata": {},
+              "template": "base",
+              "createdAt": "2030-01-01T00:00:00Z",
+              "expiresAt": "2030-01-01T01:00:00Z",
+              "cpu": 2,
+              "memMb": 2048
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "state": "running"
+        },
+        "requests": 2
+      },
+      "why": "a dropped connection (no response at all) is a network error: idempotent requests retry it"
+    },
+    {
+      "id": "pause-503-not-retried-without-idempotency-key",
+      "op": "sandbox.pause",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/pause",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "idempotency-key": "<absent>"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 503,
+            "body": {
+              "error": "HTTP 503",
+              "retryable": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "no_capacity",
+          "status": 503
+        },
+        "requests": 2
+      },
+      "why": "a POST that carries no Idempotency-Key is not retry-safe: even a 503 with retryable:true is not retried (requests = the create + one pause)"
+    }
+  ]
+}

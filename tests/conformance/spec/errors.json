@@ -1,0 +1,641 @@
+{
+  "comment": "Gateway error responses -> the error an SDK raises (type, status, code), and how many requests it made. Types are language-neutral: auth, plan, concurrency_limit, no_capacity, not_stopped, gateway; each adapter maps its own classes. The mapping dispatches on the body `code` first, status second (PROTOCOL.md section 4).",
+  "errors": [
+    {
+      "id": "401",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:unauthorized-401"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "auth",
+          "status": 401,
+          "code": "Unauthorized"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "402-plan",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:featureRequiresPlan-402"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "plan",
+          "status": 402,
+          "code": "FeatureRequiresPlan"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "402-credit",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:insufficientCredit-402"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "plan",
+          "status": 402,
+          "code": "InsufficientCredit"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "403-not-entitled",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:notEntitled-403"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "plan",
+          "status": 403,
+          "code": "NotEntitled"
+        },
+        "requests": 1
+      },
+      "why": "NotEntitled is a plan problem (PROTOCOL.md section 4); Go/Rust/C++ call it an auth error, TS/Python a plain gateway error"
+    },
+    {
+      "id": "404",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:notFound-404"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 404,
+          "code": "NotFound"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "409-not-stopped",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:notStopped-409"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "not_stopped",
+          "status": 409,
+          "code": "NotStopped"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "409-start-in-progress",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:startInProgress-409"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "not_stopped",
+          "status": 409,
+          "code": "StartInProgress"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "409-sandbox-stopped",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:sandboxStopped-409"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 409,
+          "code": "SandboxStopped"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "410-gone",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:sandboxGone-410"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 410,
+          "code": "SandboxGone"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "429-concurrency-cap",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:concurrencyLimit-429"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "concurrency_limit",
+          "status": 429,
+          "code": "ConcurrencyLimitExceeded"
+        },
+        "requests": 1
+      },
+      "why": "the org is at its session cap; never retried"
+    },
+    {
+      "id": "500-internal",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:internal-500"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 500,
+          "code": "InternalError"
+        },
+        "requests": 1
+      },
+      "why": "500 is a permanent refusal, not in the retry allowlist"
+    },
+    {
+      "id": "501-not-supported",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:notImplemented-501"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 501,
+          "code": "NotSupported"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "503-no-capacity",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:noCapacity-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "no_capacity",
+          "status": 503,
+          "code": "NoCapacity"
+        },
+        "requests": 6
+      },
+      "why": "retried to exhaustion; the final error keeps its type, status and code"
+    },
+    {
+      "id": "503-sandbox-unavailable",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:sandboxUnavailable-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 503,
+          "code": "SandboxUnavailable"
+        },
+        "requests": 6
+      },
+      "why": "a 503 is only 'no capacity' when its code says so; SandboxUnavailable is a plain gateway error (PROTOCOL.md section 4)"
+    },
+    {
+      "id": "403-other",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:forbidden-403"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 403,
+          "code": "Forbidden"
+        },
+        "requests": 1
+      },
+      "why": "only NotEntitled is a plan problem; any other 403 is a plain gateway error"
+    },
+    {
+      "id": "429-no-code",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:noCode-429"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "concurrency_limit",
+          "status": 429
+        },
+        "requests": 1
+      },
+      "why": "a 429 with NO code keeps its historical meaning (the org cap); only an explicit other code is a plain gateway error"
+    },
+    {
+      "id": "429-object-limit",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:objectLimit-429"
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 429,
+          "code": "ObjectLimit"
+        },
+        "requests": 1
+      }
+    },
+    {
+      "id": "503-no-code",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:noCode-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "no_capacity",
+          "status": 503
+        },
+        "requests": 6
+      },
+      "why": "a 503 with NO code keeps its historical meaning (no capacity)"
+    },
+    {
+      "id": "503-start-timeout",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:startTimeout-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "no_capacity",
+          "status": 503,
+          "code": "StartTimeout"
+        },
+        "requests": 6
+      }
+    },
+    {
+      "id": "503-store-unavailable",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:storeUnavailable-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 503,
+          "code": "StoreUnavailable"
+        },
+        "requests": 6
+      }
+    },
+    {
+      "id": "503-admission-unavailable",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:admissionUnavailable-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 503,
+          "code": "AdmissionUnavailable"
+        },
+        "requests": 6
+      }
+    },
+    {
+      "id": "503-dependency-unavailable",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:dependencyUnavailable-503",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 503,
+          "code": "DependencyUnavailable"
+        },
+        "requests": 6
+      }
+    },
+    {
+      "id": "507-insufficient-capacity",
+      "op": "sandbox.get",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "GET",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig",
+            "headers": {
+              "authorization": "Bearer conformance-test-key"
+            }
+          },
+          "reply": "gateway:insufficientCapacity-507",
+          "times": 6
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 507,
+          "code": "InsufficientCapacity"
+        },
+        "requests": 6
+      },
+      "why": "507 is retried (allowlist) and stays a gateway error"
+    }
+  ]
+}

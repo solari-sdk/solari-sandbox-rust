@@ -15,6 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The conformance rows run against a mock gateway written in JavaScript (tests/conformance/mock-server.mjs).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Conformance copy matches its pinned source
+        run: tests/conformance/check-source.sh
       - name: Toolchain
         run: rustup toolchain install stable --profile minimal && rustup default stable
       # Not --locked: Cargo.lock is not committed for this library crate.

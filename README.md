@@ -131,3 +131,17 @@ server); no live gateway is needed.
 cargo build
 cargo test
 ```
+
+### Conformance
+
+`tests/conformance.rs` runs the cross-language conformance rows (`tests/conformance/spec/`, the same rows every Solari SDK runs)
+against this SDK through a mock gateway (`tests/conformance/mock-server.mjs`, so `node` 18+ must be on `PATH`). 8 of the 30
+abstract ops are supported by this SDK; the other 22 are listed with a reason in `tests/conformance/unsupported.json`. A row this SDK
+currently fails is listed in `tests/conformance/knownGaps.json` and must keep failing until the entry is deleted.
+`tests/conformance/SOURCE.txt` pins where the vendored files come from; `tests/conformance/check-source.sh` fails if a copy was edited.
+One live smoke row (`live_conformance_smoke_create_get_kill_gone`: create, get, kill, then 404) is in `tests/live.rs`; it runs on
+staging only:
+
+```
+SOLARI_LIVE=1 SOLARI_API_KEY=… SOLARI_BASE_URL=https://api-sta.getsolari.com cargo test --test live conformance_smoke
+```

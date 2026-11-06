@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "solari-conformance-row",
+  "title": "A conformance row",
+  "description": "One row of a named group in a spec file. Layers add their own fields (additionalProperties is true on purpose); lib/spec.mjs is the executable validator and tolerates unknown fields with a warning.",
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1, "description": "Unique within its group." },
+    "op": { "type": "string", "description": "Abstract operation, e.g. sandbox.create. The language adapter maps it to a call." },
+    "input": { "description": "Language-neutral arguments, camelCase." },
+    "expect": { "description": "What the layer asserts: { result } or { error: { type, status, code, retryable } } or { requests: n } ..." },
+    "live": { "type": "boolean", "description": "Also run against staging by the live runner (stateless rows only)." },
+    "mock": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Scripted gateway: ordered exchanges the code under test must make.",
+      "items": {
+        "type": "object",
+        "required": ["expect", "reply"],
+        "properties": {
+          "expect": {
+            "type": "object",
+            "required": ["method", "path"],
+            "properties": {
+              "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] },
+              "path": { "type": "string", "pattern": "^/" },
+              "headers": { "type": "object", "description": "Subset; values may be matchers <any> <present> <string> <number> <uuid>." },
+              "body": { "description": "Deep subset of the JSON body; null = no body; leaves may be matchers." }
+            }
+          },
+          "reply": {
+            "oneOf": [
+              { "type": "string", "pattern": "^gateway:", "description": "A row of spec/gateway-responses.json by id." },
+              { "type": "object", "required": ["status"], "properties": { "status": { "type": "integer", "minimum": 100, "maximum": 599 }, "headers": { "type": "object" }, "body": {}, "delayMs": { "type": "integer", "minimum": 0 } } }
+            ]
+          },
+          "times": { "type": "integer", "minimum": 1, "description": "Repeat this exchange n times (retry tables)." }
+        }
+      }
+    },
+    "why": { "type": "string" }
+  },
+  "additionalProperties": true
+}

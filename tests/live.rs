@@ -495,3 +495,44 @@ async fn live_sandbox_has_no_stream_url() {
     })
     .await;
 }
+
+/// One live-staging smoke row of the conformance suite (tests/conformance): create -> get -> kill, then the id is gone. The mock rows
+/// prove the bytes this SDK sends and how it maps answers; this proves the real gateway agrees with them. Staging or loopback only (a
+/// prod key can never be used here); creates exactly one sandbox, tagged `{owner: conformance-rust, run}`, and kills only that id.
+#[tokio::test]
+async fn live_conformance_smoke_create_get_kill_gone() {
+    let Some((key, base)) = live_target() else { return };
+    let host = base.split("://").nth(1).unwrap_or("");
+    assert!(
+        host.starts_with("api-sta") || host.starts_with("localhost") || host.starts_with("127.0.0.1"),
+        "the conformance smoke runs on staging (api-sta*) or loopback only, not {base}"
+    );
+    let client = Arc::new(Client::new(ClientOptions::new(key, base)).unwrap());
+    let run = format!("{:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let sbx = client
+        .create(CreateOptions {
+            template: Some("base".into()),
+            metadata: Some(HashMap::from([("owner".to_string(), "conformance-rust".to_string()), ("run".to_string(), run)])),
+            timeout_ms: Some(120_000),
+            ..Default::default()
+        })
+        .await
+        .expect("create");
+    let id = sbx.id().to_string();
+    // Teardown that runs even if an assertion below panics: the checks run on a task and the kill follows the join.
+    let body = {
+        let (c, id) = (client.clone(), id.clone());
+        tokio::spawn(async move {
+            let view = c.get(&id).await.expect("get");
+            assert_eq!(view.sandbox_id, id);
+            assert_eq!(view.kind, "sandbox");
+            assert!(!view.state.is_empty());
+        })
+        .await
+    };
+    client.kill(&id).await.expect("kill");
+    client.kill(&id).await.expect("kill is idempotent");
+    let gone = matches!(client.get(&id).await, Err(SolariError::Gateway { status: 404, .. }));
+    body.expect("get checks");
+    assert!(gone, "GET after kill should be 404");
+}
