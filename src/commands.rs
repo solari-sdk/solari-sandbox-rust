@@ -123,6 +123,16 @@ pub struct CommandHandle {
     rx: mpsc::UnboundedReceiver<AsyncFrame>,
     on_stdout: Option<OutputCallback>,
     on_stderr: Option<OutputCallback>,
+    /// Set when output callbacks were given: a task drains the command's frames and calls them as the output arrives, so
+    /// they fire without anyone polling [`wait`](Self::wait). `wait` then collects the finished result from it.
+    pump: Option<Pump>,
+}
+
+/// The task that drives a started command's callbacks (see [`CommandHandle::pump`]).
+struct Pump {
+    done: tokio::sync::oneshot::Receiver<Result<CommandResult, SolariError>>,
+    /// Output so far, for the partial result when a deadline kills the command.
+    partial: Arc<std::sync::Mutex<(String, String)>>,
 }
 
 impl CommandHandle {
@@ -162,68 +172,121 @@ impl CommandHandle {
         mut self,
         deadline: Option<tokio::time::Instant>,
     ) -> Result<CommandResult, SolariError> {
-        let mut stdout = String::new();
-        let mut stderr = String::new();
-        let mut out_dec = Utf8Stream::default();
-        let mut err_dec = Utf8Stream::default();
-        loop {
-            let next = match deadline {
-                Some(d) => match tokio::time::timeout_at(d, self.rx.recv()).await {
-                    Ok(frame) => frame,
+        if let Some(pump) = self.pump.take() {
+            let finished = match deadline {
+                Some(d) => match tokio::time::timeout_at(d, pump.done).await {
+                    Ok(r) => r,
                     Err(_) => {
                         let _ = self.kill(Some(9)).await;
                         self.channel.unregister_command(&self.cmd_id);
-                        return Ok(CommandResult { exit_code: -1, stdout, stderr, timed_out: true });
+                        let (stdout, stderr) = pump.partial.lock().map(|g| g.clone()).unwrap_or_default();
+                        return Ok(CommandResult::from_text(-1, stdout, stderr, true));
                     }
                 },
-                None => self.rx.recv().await,
+                None => pump.done.await,
             };
-            let Some(frame) = next else { break };
-            match frame.typ.as_str() {
-                "cmd.data" => {
-                    let is_err = frame.stream.as_deref() == Some("stderr");
-                    // One streaming decoder per stream: a multi-byte character split across two frames must come out
-                    // whole, not as U+FFFD at each end.
-                    let bytes = frame.base64.as_ref().map(|b| decode_bytes(b)).unwrap_or_default();
-                    let text = if is_err { err_dec.push(&bytes) } else { out_dec.push(&bytes) };
-                    if is_err {
-                        stderr.push_str(&text);
-                        if let Some(cb) = &self.on_stderr {
-                            cb(&text);
-                        }
-                    } else {
-                        stdout.push_str(&text);
-                        if let Some(cb) = &self.on_stdout {
-                            cb(&text);
-                        }
-                    }
-                }
-                "cmd.exit" => {
-                    let exit_code = frame.exit_code.unwrap_or(0);
-                    self.channel.unregister_command(&self.cmd_id);
-                    // Bytes held back at the end of a stream (a truncated character) are flushed, not dropped.
-                    let rest = out_dec.finish();
-                    if !rest.is_empty() {
-                        stdout.push_str(&rest);
-                        if let Some(cb) = &self.on_stdout {
-                            cb(&rest);
-                        }
-                    }
-                    let rest = err_dec.finish();
-                    if !rest.is_empty() {
-                        stderr.push_str(&rest);
-                        if let Some(cb) = &self.on_stderr {
-                            cb(&rest);
-                        }
-                    }
-                    return Ok(CommandResult { exit_code, stdout, stderr, timed_out: false });
-                }
-                _ => {}
+            return finished.unwrap_or_else(|_| Err(SolariError::connection("Control channel closed")));
+        }
+        drain(
+            &mut self.rx,
+            &self.channel,
+            &self.cmd_id,
+            self.on_stdout.clone(),
+            self.on_stderr.clone(),
+            deadline,
+            None,
+        )
+        .await
+    }
+}
+
+/// Read a command's frames to its exit: decode each stream with one streaming UTF-8 decoder, call the callbacks as output
+/// arrives, and return the result. With a deadline, an elapsed deadline kills the command and returns exit -1 with the output
+/// so far. `partial` (when given) mirrors the output so far for a caller that kills the command from outside.
+async fn drain(
+    rx: &mut mpsc::UnboundedReceiver<AsyncFrame>,
+    channel: &Arc<ControlChannel>,
+    cmd_id: &str,
+    on_stdout: Option<OutputCallback>,
+    on_stderr: Option<OutputCallback>,
+    deadline: Option<tokio::time::Instant>,
+    partial: Option<Arc<std::sync::Mutex<(String, String)>>>,
+) -> Result<CommandResult, SolariError> {
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    let mut out_dec = Utf8Stream::default();
+    let mut err_dec = Utf8Stream::default();
+    let (mut out_raw, mut err_raw): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
+    let mirror = |o: &str, e: &str| {
+        if let Some(p) = &partial {
+            if let Ok(mut g) = p.lock() {
+                *g = (o.to_string(), e.to_string());
             }
         }
-        // Channel dropped before `cmd.exit`.
-        Err(SolariError::connection("Control channel closed"))
+    };
+    loop {
+        let next = match deadline {
+            Some(d) => match tokio::time::timeout_at(d, rx.recv()).await {
+                Ok(frame) => frame,
+                Err(_) => {
+                    let io = CommandIo { cmd_id: cmd_id.to_string(), channel: channel.clone() };
+                    let _ = io.kill(Some(9)).await;
+                    channel.unregister_command(cmd_id);
+                    return Ok(CommandResult { exit_code: -1, stdout, stderr, timed_out: true, oom_killed: false, stdout_bytes: out_raw, stderr_bytes: err_raw });
+                }
+            },
+            None => rx.recv().await,
+        };
+        let Some(frame) = next else { break };
+        match frame.typ.as_str() {
+            "cmd.data" => {
+                let is_err = frame.stream.as_deref() == Some("stderr");
+                // One streaming decoder per stream: a multi-byte character split across two frames must come out whole.
+                let bytes = frame.base64.as_ref().map(|b| decode_bytes(b)).unwrap_or_default();
+                let text = if is_err { err_dec.push(&bytes) } else { out_dec.push(&bytes) };
+                if is_err {
+                    err_raw.extend_from_slice(&bytes);
+                } else {
+                    out_raw.extend_from_slice(&bytes);
+                }
+                if is_err {
+                    stderr.push_str(&text);
+                    if let Some(cb) = &on_stderr {
+                        cb(&text);
+                    }
+                } else {
+                    stdout.push_str(&text);
+                    if let Some(cb) = &on_stdout {
+                        cb(&text);
+                    }
+                }
+                mirror(&stdout, &stderr);
+            }
+            "cmd.exit" => {
+                let exit_code = frame.exit_code.unwrap_or(0);
+                channel.unregister_command(cmd_id);
+                // Bytes held back at the end of a stream (a truncated character) are flushed, not dropped.
+                let rest = out_dec.finish();
+                if !rest.is_empty() {
+                    stdout.push_str(&rest);
+                    if let Some(cb) = &on_stdout {
+                        cb(&rest);
+                    }
+                }
+                let rest = err_dec.finish();
+                if !rest.is_empty() {
+                    stderr.push_str(&rest);
+                    if let Some(cb) = &on_stderr {
+                        cb(&rest);
+                    }
+                }
+                return Ok(CommandResult { exit_code, stdout, stderr, timed_out: false, oom_killed: false, stdout_bytes: out_raw, stderr_bytes: err_raw });
+            }
+            _ => {}
+        }
     }
+    // Channel dropped before `cmd.exit`.
+    Err(SolariError::connection("Control channel closed"))
 }
 
 fn decode_bytes(b64: &str) -> Vec<u8> {
@@ -337,20 +400,32 @@ pub(crate) async fn start_command(
     let result = sb
         .channel()
         .call("cmd.start", cmd_start_params(cmd, opts))
-        .await?;
+        .await
+        .map_err(with_exec_failed_code)?;
     let cmd_id = result
         .get("cmdId")
         .and_then(Value::as_str)
         .ok_or_else(|| SolariError::Other("cmd.start reply missing cmdId".into()))?
         .to_string();
-    let rx = sb.channel().register_command(&cmd_id);
-    Ok(CommandHandle {
-        cmd_id,
-        channel: sb.channel_arc(),
-        rx,
-        on_stdout: opts.on_stdout.clone(),
-        on_stderr: opts.on_stderr.clone(),
-    })
+    let mut rx = sb.channel().register_command(&cmd_id);
+    let channel = sb.channel_arc();
+    let (on_stdout, on_stderr) = (opts.on_stdout.clone(), opts.on_stderr.clone());
+    // Callbacks are driven by a task, so they fire as the output arrives and not only while someone polls `wait`.
+    let pump = if on_stdout.is_some() || on_stderr.is_some() {
+        let (tx, done) = tokio::sync::oneshot::channel();
+        let partial = Arc::new(std::sync::Mutex::new((String::new(), String::new())));
+        let (ch, id, so, se, pt) = (channel.clone(), cmd_id.clone(), on_stdout.clone(), on_stderr.clone(), partial.clone());
+        tokio::spawn(async move {
+            let _ = tx.send(drain(&mut rx, &ch, &id, so, se, None, Some(pt)).await);
+        });
+        let (dummy_tx, dummy_rx) = mpsc::unbounded_channel();
+        drop(dummy_tx);
+        rx = dummy_rx;
+        Some(Pump { done, partial })
+    } else {
+        None
+    };
+    Ok(CommandHandle { cmd_id, channel, rx, on_stdout, on_stderr, pump })
 }
 
 /// `commands.run`: run a command to completion.
@@ -406,7 +481,7 @@ pub(crate) async fn run_command(
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
-            timed_out: false,
+            timed_out: false, oom_killed: false, ..Default::default()
         });
     }
     // `timeout_ms` is a deadline for the command here too (it used to be honoured only by the REST path).
@@ -438,9 +513,42 @@ async fn exec_oneshot(
         body.insert("timeoutMs".into(), Value::from(t));
     }
     let path = format!("/sandboxes/{}/exec", encode_uri_component(sb.id()));
-    sb.http()
-        .request::<CommandResult>("POST", &path, Some(Value::Object(body)), None)
-        .await
+    let r = sb.http().request::<CommandResult>("POST", &path, Some(Value::Object(body)), None).await;
+    exec_outcome(r)
+}
+
+/// Make a `/exec` answer indistinguishable from the same command on the live connection (spec: both transports give one result
+/// or one error). A deadline that fired below the guest (`400 ExecTimeout`, or the guest's vsock read timeout as a
+/// `502 ... i/o timeout`) is the elapsed-deadline RESULT, never an error; a command that cannot start is the action error
+/// `cmd.start` / `ExecFailed`, as on the live connection.
+fn exec_outcome(r: Result<CommandResult, SolariError>) -> Result<CommandResult, SolariError> {
+    let timed_out = || CommandResult::from_text(-1, String::new(), String::new(), true);
+    match r {
+        Err(SolariError::Gateway { status: 400, code: Some(c), .. }) if c == "ExecTimeout" => Ok(timed_out()),
+        Err(SolariError::Gateway { status: 502, message, .. }) if message.contains("i/o timeout") => Ok(timed_out()),
+        Err(SolariError::Gateway { status: 400, code: Some(c), message }) if c == "ExecFailed" => {
+            Err(SolariError::Action { method: "cmd.start".into(), message, code: Some(c) })
+        }
+        Ok(mut r) => {
+            r.stdout_bytes = r.stdout.clone().into_bytes();
+            r.stderr_bytes = r.stderr.clone().into_bytes();
+            Ok(r)
+        }
+        other => other,
+    }
+}
+
+/// The guest's `cmd.start` refusal carries no code. A spawn failure (`fork/exec ...`, `chdir ...`) is `ExecFailed`, the code the
+/// `/exec` route reports for the same cause.
+fn with_exec_failed_code(e: SolariError) -> SolariError {
+    match e {
+        SolariError::Action { method, message, code: None }
+            if method == "cmd.start" && (message.starts_with("fork/exec ") || message.starts_with("chdir ")) =>
+        {
+            SolariError::Action { method, message, code: Some("ExecFailed".into()) }
+        }
+        other => other,
+    }
 }
 
 /// The ergonomic `commands` accessor returned by `Sandbox::commands()`.

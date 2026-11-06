@@ -84,6 +84,12 @@ async fn gateway(handler: Handler) -> Gateway {
 }
 
 fn sandbox(gw: &Gateway) -> Sandbox {
+    sandbox_with_call_timeout(gw, 2000)
+}
+
+/// A sandbox whose per-call timeout is `call_timeout_ms`. Tests that move multi-MiB payloads through the fake gateway need
+/// more than the default 2 s: base64 and JSON of a 4 MiB chunk in a debug build on a loaded machine takes longer than that.
+fn sandbox_with_call_timeout(gw: &Gateway, call_timeout_ms: u64) -> Sandbox {
     let resp = CreateSandboxResponse {
         sandbox_id: "sb".into(),
         kind: "sandbox".into(),
@@ -95,7 +101,7 @@ fn sandbox(gw: &Gateway) -> Sandbox {
     Sandbox::from_response(
         Arc::new(HttpTransport::new(HttpOptions::new("k", "http://127.0.0.1:1")).unwrap()),
         resp,
-        Some(2000),
+        Some(call_timeout_ms),
     )
     .unwrap()
 }
@@ -158,6 +164,57 @@ async fn background_commands_still_deliver_output_to_callbacks() {
 
 // ---- stdin while another task waits ---------------------------------------------------------------------
 
+/// `commands().start` callbacks used to run only inside `wait()`: a caller that started a command, kept the handle and never
+/// awaited it saw no output at all.
+#[tokio::test]
+async fn start_callbacks_fire_without_wait_being_polled() {
+    let gw = gateway(Arc::new(|method, _| match method {
+        "cmd.start" => vec![
+            reply(json!({"cmdId": "c1"})),
+            json!({"type": "cmd.data", "cmdId": "c1", "stream": "stdout", "base64": b64(b"hello")}),
+            json!({"type": "cmd.data", "cmdId": "c1", "stream": "stderr", "base64": b64(b"warn")}),
+        ],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let sbx = sandbox(&gw);
+    let seen = Arc::new(std::sync::Mutex::new((String::new(), String::new())));
+    let (so, se) = (seen.clone(), seen.clone());
+    let mut opts = RunOptions::new();
+    opts.on_stdout = Some(Arc::new(move |t| so.lock().unwrap().0.push_str(t)));
+    opts.on_stderr = Some(Arc::new(move |t| se.lock().unwrap().1.push_str(t)));
+    let handle = sbx.commands().start("sh", opts).await.unwrap();
+    // Nobody awaits `handle.wait()`: the callbacks must still run.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while seen.lock().unwrap().clone() != ("hello".to_string(), "warn".to_string()) {
+        assert!(tokio::time::Instant::now() < deadline, "callbacks never fired: {:?}", seen.lock().unwrap());
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(handle);
+}
+
+/// Rust's `stdout` is text, so a command that prints binary data lost its bytes. `stdout_bytes` keeps them exactly.
+#[tokio::test]
+async fn stdout_bytes_keep_binary_output_exactly() {
+    let raw: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x00, 0xff, 0xfe, 0x1a];
+    let raw2 = raw.clone();
+    let gw = gateway(Arc::new(move |method, _| match method {
+        "cmd.start" => vec![
+            reply(json!({"cmdId": "c1"})),
+            json!({"type": "cmd.data", "cmdId": "c1", "stream": "stdout", "base64": b64(&raw2)}),
+            json!({"type": "cmd.exit", "cmdId": "c1", "exitCode": 0}),
+        ],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let sbx = sandbox(&gw);
+    sbx.connect().await.unwrap();
+    let r = sbx.commands().run("cat", RunOptions::new().args(["img.png"])).await.unwrap();
+    assert_eq!(r.stdout_bytes, raw, "the exact bytes");
+    assert!(r.stdout.contains('\u{FFFD}'), "the text form replaces the invalid bytes: {:?}", r.stdout);
+    assert_eq!(r.stderr_bytes, Vec::<u8>::new());
+}
+
 /// `wait(self)` consumes the handle, so a command could not be written to while it was being waited on.
 #[tokio::test]
 async fn stdin_can_be_written_while_another_task_waits() {
@@ -193,7 +250,7 @@ async fn stdin_can_be_written_while_another_task_waits() {
 #[tokio::test]
 async fn upload_sends_four_mib_chunks_truncating_only_the_first() {
     let gw = gateway(Arc::new(|_, _| vec![reply(json!({"ok": true}))])).await;
-    let sbx = sandbox(&gw);
+    let sbx = sandbox_with_call_timeout(&gw, 60_000);
     let data = vec![b'x'; 9 << 20];
     sbx.files().upload("/f", &data).await.unwrap();
     let calls = gw.calls.lock().unwrap().clone();
@@ -234,7 +291,7 @@ async fn read_loops_over_chunks_until_eof() {
         vec![reply(json!({"base64": b64(&c2[off..end]), "eof": end == c2.len(), "size": c2.len(), "nextOffset": end}))]
     }))
     .await;
-    let sbx = sandbox(&gw);
+    let sbx = sandbox_with_call_timeout(&gw, 60_000);
     let got = sbx.files().read("/big").await.unwrap();
     assert!(got == content);
     assert_eq!(methods(&gw.calls), vec!["fs.download"; 3]);

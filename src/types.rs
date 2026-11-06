@@ -177,7 +177,7 @@ pub struct GatewayErrorBody {
 // ---------------------------------------------------------------------------
 
 /// Terminal result of `commands.run` (also the `/exec` fast-path response).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
     #[serde(default)]
@@ -189,6 +189,25 @@ pub struct CommandResult {
     /// True when the command hit its `timeout_ms` and was killed (`exit_code` is -1 then).
     #[serde(default)]
     pub timed_out: bool,
+    /// True when the guest's memory watchdog killed the command (exit 137 alone is ambiguous). Always present; `false` on
+    /// every path that does not report it.
+    #[serde(default)]
+    pub oom_killed: bool,
+    /// The exact stdout bytes. `stdout` is text (UTF-8, invalid bytes replaced by U+FFFD); a command that prints binary data is
+    /// read from here. Exact on the control connection; on the one-shot `/exec` route the gateway has already turned the output
+    /// into text, so these are the bytes of that text (not recoverable from the REST answer).
+    #[serde(skip)]
+    pub stdout_bytes: Vec<u8>,
+    /// The exact stderr bytes; see `stdout_bytes`.
+    #[serde(skip)]
+    pub stderr_bytes: Vec<u8>,
+}
+
+impl CommandResult {
+    /// A result carrying text only: the byte fields are that text's bytes.
+    pub(crate) fn from_text(exit_code: i64, stdout: String, stderr: String, timed_out: bool) -> Self {
+        CommandResult { exit_code, stdout_bytes: stdout.clone().into_bytes(), stderr_bytes: stderr.clone().into_bytes(), stdout, stderr, timed_out, oom_killed: false }
+    }
 }
 
 // ---------------------------------------------------------------------------

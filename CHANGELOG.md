@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0
+
+`commands().run` now behaves the same over the one-shot `/exec` route and the live control connection (the shared conformance rows in `tests/conformance/spec/commands.json` pin it; before this release 8 of them failed for this SDK).
+
+### Changed
+- **A deadline that fires below the guest is a result, not an error.** `400 ExecTimeout` and the guest's hidden vsock read timeout (`502 ... i/o timeout`) on `/exec` now return `CommandResult { exit_code: -1, timed_out: true, .. }`, the same result the live connection gives when `timeout_ms` elapses.
+- **A command that cannot start is one error on both routes:** `SolariError::Action { method: "cmd.start", code: Some("ExecFailed"), message }`. `/exec` reports it as a `400 ExecFailed` gateway error, which used to come back as `SolariError::Gateway`; the live connection's refusal carries no code, and `fork/exec ...` / `chdir ...` now get `ExecFailed`.
+- `CommandResult` gained fields, so code that builds one with a struct literal needs `..Default::default()`.
+
+### Added
+- **`CommandResult::oom_killed`**: true when the guest's memory watchdog killed the command (exit 137 alone is ambiguous). Always present.
+- **`CommandResult::stdout_bytes` / `stderr_bytes`**: the exact output bytes. `stdout` / `stderr` stay UTF-8 text (invalid bytes become U+FFFD); a command that prints binary data is read from the byte fields. They are exact on the live connection; on `/exec` the gateway has already turned the output into text, so they are the bytes of that text.
+- **`SolariError::ExecInterrupted`** for `409 ExecInterrupted` (the sandbox was parked while the command ran, so it may have partly run). It is never retried and never re-run on the live connection: exactly one `/exec` request.
+
+### Fixed
+- **`commands().start` output callbacks fire without `wait()`.** They ran only inside `wait()`, so a caller that kept the handle and never awaited it saw no output. A task now drives them as the output arrives; `wait()` collects the result.
+- A flaky test: `read_loops_over_chunks_until_eof` and the upload test used a 2 s call timeout that a loaded machine exceeds with 4 MiB chunks in a debug build (20 failures in 25 runs under CPU load; 0 after), and `commands_run_timeout_kills_the_command` used an 80 ms deadline.
+- Correction to 0.4.0: `SolariError` is `#[non_exhaustive]`, so a new variant is not a breaking change for code outside the crate; only matches written inside this crate are exhaustive.
+
 ## 0.4.0
 
 ### Added

@@ -1,0 +1,1646 @@
+{
+  "comment": "commands.run over the two transports (REST /exec and the control WebSocket) must be indistinguishable: ~/reports/x2/spec.md. Each scenario has a -rest row (no channel, no env: the SDK uses /exec) and a -ws row (env set: the SDK uses cmd.start over the scripted control socket) with the SAME expect. via is the transport the adapter forces.",
+  "commands": [
+    {
+      "id": "run-ok-rest",
+      "op": "commands.run",
+      "why": "plain success: all four result fields",
+      "input": {
+        "via": "rest",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "hi\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "hi\n",
+          "stderr": "",
+          "timedOut": false,
+          "oomKilled": false
+        }
+      }
+    },
+    {
+      "id": "run-ok-ws",
+      "op": "commands.run",
+      "why": "plain success: all four result fields",
+      "input": {
+        "via": "ws",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "aGkK"
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "hi\n",
+          "stderr": "",
+          "timedOut": false,
+          "oomKilled": false
+        }
+      }
+    },
+    {
+      "id": "run-nonzero-rest",
+      "op": "commands.run",
+      "why": "non-zero exit keeps both streams",
+      "input": {
+        "via": "rest",
+        "cmd": "sh",
+        "args": [
+          "-c",
+          "echo o; echo e >&2; exit 3"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sh",
+              "args": [
+                "-c",
+                "echo o; echo e >&2; exit 3"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 3,
+              "stdout": "o\n",
+              "stderr": "e\n",
+              "timedOut": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 3,
+          "stdout": "o\n",
+          "stderr": "e\n",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-nonzero-ws",
+      "op": "commands.run",
+      "why": "non-zero exit keeps both streams",
+      "input": {
+        "via": "ws",
+        "cmd": "sh",
+        "args": [
+          "-c",
+          "echo o; echo e >&2; exit 3"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "sh",
+              "args": [
+                "-c",
+                "echo o; echo e >&2; exit 3"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "bwo="
+            },
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stderr",
+              "base64": "ZQo="
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 3
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 3,
+          "stdout": "o\n",
+          "stderr": "e\n",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-multibyte-split-rest",
+      "op": "commands.run",
+      "why": "a multibyte character split across chunks survives (one decoder per stream, not per chunk)",
+      "input": {
+        "via": "rest",
+        "cmd": "printf",
+        "args": [
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "printf",
+              "args": [
+                "x"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "漢漢\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "漢漢\n",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-multibyte-split-ws",
+      "op": "commands.run",
+      "why": "a multibyte character split across chunks survives (one decoder per stream, not per chunk)",
+      "input": {
+        "via": "ws",
+        "cmd": "printf",
+        "args": [
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "printf",
+              "args": [
+                "x"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "5rw="
+            },
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "ouY="
+            },
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "vKIK"
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "漢漢\n",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-invalid-utf8-rest",
+      "op": "commands.run",
+      "why": "invalid bytes become U+FFFD, valid bytes after them are kept",
+      "input": {
+        "via": "rest",
+        "cmd": "printf",
+        "args": [
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "printf",
+              "args": [
+                "x"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "��a\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "��a\n",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-invalid-utf8-ws",
+      "op": "commands.run",
+      "why": "invalid bytes become U+FFFD, valid bytes after them are kept",
+      "input": {
+        "via": "ws",
+        "cmd": "printf",
+        "args": [
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "printf",
+              "args": [
+                "x"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "//5hCg=="
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "��a\n",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-nul-byte-rest",
+      "op": "commands.run",
+      "why": "NUL is kept in the text",
+      "input": {
+        "via": "rest",
+        "cmd": "printf",
+        "args": [
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "printf",
+              "args": [
+                "x"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "a\u0000b\n",
+              "stderr": "",
+              "timedOut": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "a\u0000b\n",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-nul-byte-ws",
+      "op": "commands.run",
+      "why": "NUL is kept in the text",
+      "input": {
+        "via": "ws",
+        "cmd": "printf",
+        "args": [
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "printf",
+              "args": [
+                "x"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "YQBiCg=="
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "a\u0000b\n",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-killed-by-signal-rest",
+      "op": "commands.run",
+      "why": "death by signal is exit -1, not a timeout",
+      "input": {
+        "via": "rest",
+        "cmd": "sh",
+        "args": [
+          "-c",
+          "kill -9 $$"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sh",
+              "args": [
+                "-c",
+                "kill -9 $$"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": -1,
+              "stdout": "",
+              "stderr": "",
+              "timedOut": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": -1,
+          "stdout": "",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-killed-by-signal-ws",
+      "op": "commands.run",
+      "why": "death by signal is exit -1, not a timeout",
+      "input": {
+        "via": "ws",
+        "cmd": "sh",
+        "args": [
+          "-c",
+          "kill -9 $$"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "sh",
+              "args": [
+                "-c",
+                "kill -9 $$"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": -1
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": -1,
+          "stdout": "",
+          "stderr": "",
+          "timedOut": false
+        }
+      }
+    },
+    {
+      "id": "run-timeout-rest",
+      "op": "commands.run",
+      "why": "an elapsed deadline RETURNS exit -1, the partial output and timedOut true; it never throws",
+      "input": {
+        "via": "rest",
+        "cmd": "sleep",
+        "args": [
+          "30"
+        ],
+        "timeoutMs": 1000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sleep",
+              "args": [
+                "30"
+              ],
+              "timeoutMs": 1000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": -1,
+              "stdout": "part",
+              "stderr": "",
+              "timedOut": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": -1,
+          "stdout": "part",
+          "timedOut": true
+        }
+      }
+    },
+    {
+      "id": "run-timeout-ws",
+      "op": "commands.run",
+      "why": "an elapsed deadline RETURNS exit -1, the partial output and timedOut true; it never throws",
+      "input": {
+        "via": "ws",
+        "cmd": "sleep",
+        "args": [
+          "30"
+        ],
+        "timeoutMs": 1000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "sleep",
+              "args": [
+                "30"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "cGFydA=="
+            }
+          ]
+        },
+        {
+          "expect": {
+            "method": "cmd.kill"
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "ok": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": -1,
+          "stdout": "part",
+          "timedOut": true
+        }
+      }
+    },
+    {
+      "id": "run-cannot-start-rest",
+      "op": "commands.run",
+      "why": "a command that cannot start is the same error on both paths: action error, code ExecFailed, message names the cause",
+      "input": {
+        "via": "rest",
+        "cmd": "/nope",
+        "args": [],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "/nope",
+              "args": [],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 400,
+            "body": {
+              "code": "ExecFailed",
+              "error": "fork/exec /nope: no such file or directory"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "action",
+          "code": "ExecFailed"
+        }
+      }
+    },
+    {
+      "id": "run-cannot-start-ws",
+      "op": "commands.run",
+      "why": "a command that cannot start is the same error on both paths: action error, code ExecFailed, message names the cause (the guest's live-connection reply carries no code: the SDK adds ExecFailed)",
+      "input": {
+        "via": "ws",
+        "cmd": "/nope",
+        "args": [],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "/nope",
+              "args": []
+            }
+          },
+          "reply": {
+            "ok": false,
+            "error": {
+              "message": "fork/exec /nope: no such file or directory"
+            }
+          },
+          "then": []
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "action",
+          "code": "ExecFailed"
+        }
+      }
+    },
+    {
+      "id": "run-rest-json-404-reaches-caller",
+      "op": "commands.run",
+      "why": "a JSON 404 from /exec (sandbox gone) is the caller's error; it must not fall back to the control channel",
+      "input": {
+        "via": "rest",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 404,
+            "body": {
+              "code": "NotFound",
+              "error": "Sandbox not found"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "status": 404
+        },
+        "requests": 2,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-rest-route-not-served-falls-back",
+      "op": "commands.run",
+      "why": "only a plain-text 404 (route not served: an older gateway) falls back to the control channel, before anything ran",
+      "input": {
+        "via": "rest",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 404,
+            "body": "Not Found",
+            "headers": {
+              "content-type": "text/plain"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "b2sK"
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "ok\n",
+          "timedOut": false
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "run-rest-guest-read-timeout",
+      "op": "commands.run",
+      "why": "the guest's hidden vsock read timeout (502 'i/o timeout') is an elapsed deadline: a result with exit -1 and timedOut true, never an exception",
+      "input": {
+        "via": "rest",
+        "cmd": "sleep",
+        "args": [
+          "30"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sleep",
+              "args": [
+                "30"
+              ],
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 502,
+            "body": {
+              "error": "read tcp 10.0.0.1:1->10.0.0.2:2: i/o timeout",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": -1,
+          "timedOut": true
+        },
+        "requests": 2,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-rest-oom-killed",
+      "op": "commands.run",
+      "why": "the memory watchdog's kill is told apart from any other SIGKILL: the guest's oomKilled reaches the result (exit 137 alone is ambiguous); every result carries the boolean (run-ok rows pin false). WS path: the live-connection `exec` is not used by any SDK for shared contexts, so rest only",
+      "input": {
+        "via": "rest",
+        "cmd": "python3",
+        "args": [
+          "-c",
+          "x"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "python3",
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 137,
+              "stdout": "",
+              "stderr": "killed: memory limit",
+              "timedOut": false,
+              "oomKilled": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 137,
+          "stderr": "killed: memory limit",
+          "timedOut": false,
+          "oomKilled": true
+        },
+        "requests": 2,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-rest-exec-timeout-400",
+      "op": "commands.run",
+      "why": "the gateway answers a deadline that fired below the guest as 400 ExecTimeout (timedOut:true, retryable:false, deliberately not 504): the SDK turns it into the same timed-out result as every other deadline",
+      "input": {
+        "via": "rest",
+        "cmd": "sleep",
+        "args": [
+          "30"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sleep",
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 400,
+            "body": {
+              "code": "ExecTimeout",
+              "error": "command exceeded its deadline",
+              "timedOut": true,
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": -1,
+          "timedOut": true
+        },
+        "requests": 2,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-rest-exec-interrupted-not-retried",
+      "op": "commands.run",
+      "why": "409 ExecInterrupted (the sandbox was parked mid-command, it may have partly run) is a typed error and is never retried or re-run on the live connection: exactly one /exec request",
+      "input": {
+        "via": "rest",
+        "cmd": "sleep",
+        "args": [
+          "30"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sleep",
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 409,
+            "body": {
+              "code": "ExecInterrupted",
+              "error": "the command may have partially run before the sandbox was parked",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "gateway",
+          "status": 409,
+          "code": "ExecInterrupted",
+          "retryable": false
+        },
+        "requests": 2,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-rest-502-not-retried",
+      "op": "commands.run",
+      "why": "/exec is not idempotent: a 502 (sandbox not reachable) is NOT retried even though 502 is in the retry allowlist, because the command may have run: exactly one /exec request",
+      "input": {
+        "via": "rest",
+        "cmd": "sleep",
+        "args": [
+          "30"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "sleep",
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 502,
+            "body": {
+              "error": "Sandbox is not reachable"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "status": 502
+        },
+        "requests": 2,
+        "wsCalls": 0
+      }
+    }
+  ]
+}

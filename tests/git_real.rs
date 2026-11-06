@@ -75,7 +75,7 @@ impl GitRunner for RealGit {
             exit_code: out.status.code().unwrap_or(-1) as i64,
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-            timed_out: false,
+            timed_out: false, oom_killed: false, ..Default::default()
         };
         Box::pin(async move { Ok(r) })
     }
