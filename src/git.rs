@@ -11,7 +11,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::error::SolariError;
-use crate::types::{CommandResult, GitBranch, GitCommit, GitStatus};
+use crate::types::{CommandResult, GitBranch, GitCommit, GitStatus, GitStatusEntry};
 
 /// The seam the git namespace runs commands through. `Sandbox` implements it by
 /// delegating to `commands.run("git", …)`; tests implement a recording stub.
@@ -156,7 +156,9 @@ impl<'a> Git<'a> {
                 vec![
                     "status".into(),
                     "--porcelain=v1".into(),
+                    "-z".into(),
                     "--branch".into(),
+                    "--untracked-files=all".into(),
                 ],
                 cwd.map(String::from),
             )
@@ -267,8 +269,9 @@ impl<'a> Git<'a> {
         let out = self
             .must_git(
                 vec![
-                    "branch".into(),
-                    "--format=%(HEAD)%1f%(refname:short)%1f%(objectname:short)".into(),
+                    "for-each-ref".into(),
+                    "--format=%(HEAD)%1f%(refname:short)%1f%(objectname:short)%1f%(upstream:short)".into(),
+                    "refs/heads".into(),
                 ],
                 cwd.map(String::from),
             )
@@ -280,14 +283,19 @@ impl<'a> Git<'a> {
     pub async fn log(&self, opts: GitLogOptions) -> Result<Vec<GitCommit>, SolariError> {
         let mut args = vec![
             "log".to_string(),
-            "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s".to_string(),
+            "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e".to_string(),
         ];
         if let Some(n) = opts.max_count {
             if n > 0 {
                 args.push(format!("--max-count={n}"));
             }
         }
-        let out = self.must_git(args, opts.cwd).await?;
+        // A repository with no commit yet is an empty history, not an error.
+        let out = match self.must_git(args, opts.cwd).await {
+            Ok(out) => out,
+            Err(SolariError::Git { message }) if message.contains("does not have any commits yet") => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
         Ok(parse_log(&out))
     }
 }
@@ -368,60 +376,64 @@ fn reject_option_like(what: &str, v: &str) -> Result<(), SolariError> {
     Ok(())
 }
 
-/// Parse `git status --porcelain=v1 --branch` output.
+/// Parse `git status --porcelain=v1 -z --branch --untracked-files=all` output: NUL-terminated records, the first
+/// `## branch...upstream [ahead N, behind M]`, then `XY path`, where a rename or copy (X or Y is R/C) is followed by one more
+/// record holding the ORIGINAL path. Paths are verbatim (`-z` turns quoting off).
 pub(crate) fn parse_status(out: &str) -> GitStatus {
-    let mut st = GitStatus {
-        branch: String::new(),
-        detached: false,
-        ahead: 0,
-        behind: 0,
-        staged: Vec::new(),
-        modified: Vec::new(),
-        untracked: Vec::new(),
-        clean: true,
-    };
-    for line in out.split('\n').filter(|l| !l.is_empty()) {
-        if let Some(head) = line.strip_prefix("## ") {
-            if head.starts_with("HEAD (no branch)") {
-                st.detached = true;
-            } else {
-                // "main...origin/main [ahead 1, behind 2]" | "main" | "No commits yet on main"
-                let body = head
-                    .strip_prefix("No commits yet on ")
-                    .unwrap_or(head)
-                    .to_string();
-                let before_dots = body.split("...").next().unwrap_or("");
-                st.branch = before_dots.split(' ').next().unwrap_or("").to_string();
-                if let (Some(open), Some(close)) = (head.find('['), head.find(']')) {
-                    if close > open {
-                        let inner = &head[open + 1..close];
-                        st.ahead = extract_after(inner, "ahead ").unwrap_or(0);
-                        st.behind = extract_after(inner, "behind ").unwrap_or(0);
-                    }
-                }
-            }
+    let mut st = GitStatus { clean: true, ..Default::default() };
+    let mut records = out.split('\0').filter(|r| !r.is_empty());
+    while let Some(rec) = records.next() {
+        if let Some(head) = rec.strip_prefix("## ") {
+            parse_status_header(head, &mut st);
             continue;
         }
-        if line.len() < 3 {
-            continue;
+        let mut chars = rec.chars();
+        let (Some(x), Some(y)) = (chars.next(), chars.next()) else { continue };
+        let path = rec.get(3..).unwrap_or("").to_string();
+        let orig_path = if matches!(x, 'R' | 'C') || matches!(y, 'R' | 'C') { records.next().map(String::from) } else { None };
+        if x == '!' && y == '!' {
+            continue; // ignored files are not part of the status
         }
-        let xy: Vec<char> = line.chars().take(2).collect();
-        let path = &line[3..];
-        if xy[0] == '?' && xy[1] == '?' {
-            st.untracked.push(path.to_string());
+        st.entries.push(GitStatusEntry { path: path.clone(), orig_path, index: x, worktree: y });
+        if x == '?' && y == '?' {
+            st.untracked.push(path);
+        } else if matches!((x, y), ('D', 'D') | ('A', 'U') | ('U', 'D') | ('U', 'A') | ('D', 'U') | ('A', 'A') | ('U', 'U')) {
+            st.conflicted.push(path);
         } else {
-            let index = xy[0];
-            let work = xy[1];
-            if index != ' ' && index != '?' {
-                st.staged.push(path.to_string());
+            if x != ' ' {
+                st.staged.push(path.clone());
             }
-            if work != ' ' && work != '?' {
-                st.modified.push(path.to_string());
+            if y != ' ' {
+                st.modified.push(path);
             }
         }
     }
-    st.clean = st.staged.is_empty() && st.modified.is_empty() && st.untracked.is_empty();
+    st.clean = st.entries.is_empty();
     st
+}
+
+/// `main...origin/main [ahead 1, behind 2]` | `main...origin/main [gone]` | `main` | `No commits yet on main` | `HEAD (no branch)`.
+fn parse_status_header(head: &str, st: &mut GitStatus) {
+    if head.starts_with("HEAD (no branch)") {
+        st.detached = true;
+        return;
+    }
+    let head = head.strip_prefix("No commits yet on ").or_else(|| head.strip_prefix("Initial commit on ")).unwrap_or(head);
+    let (refs, counts) = match head.find(" [") {
+        Some(at) => (&head[..at], Some(&head[at + 2..])),
+        None => (head, None),
+    };
+    match refs.split_once("...") {
+        Some((branch, upstream)) => {
+            st.branch = branch.to_string();
+            st.upstream = Some(upstream.to_string());
+        }
+        None => st.branch = refs.to_string(),
+    }
+    if let Some(counts) = counts {
+        st.ahead = extract_after(counts, "ahead ").unwrap_or(0);
+        st.behind = extract_after(counts, "behind ").unwrap_or(0);
+    }
 }
 
 /// Read the integer immediately following `marker` inside `s` (e.g. "ahead 2").
@@ -431,40 +443,43 @@ fn extract_after(s: &str, marker: &str) -> Option<i64> {
     digits.parse().ok()
 }
 
-/// Parse the `%(HEAD)%1f%(refname:short)%1f%(objectname:short)` branch format.
+/// Parse the `%(HEAD)%1f%(refname:short)%1f%(objectname:short)%1f%(upstream:short)` for-each-ref format, one branch per line.
+/// A detached HEAD is not a branch (`refs/heads` has no entry for it), so nothing is current then.
 pub(crate) fn parse_branches(out: &str) -> Vec<GitBranch> {
     let mut branches = Vec::new();
     for line in out.split('\n') {
-        if line.trim().is_empty() {
+        if line.is_empty() {
             continue;
         }
         let fields: Vec<&str> = line.split('\x1f').collect();
-        let head = fields.first().copied().unwrap_or("");
-        let name = fields.get(1).copied().unwrap_or("");
-        let commit = fields.get(2).copied().unwrap_or("");
+        let upstream = fields.get(3).copied().unwrap_or("");
         branches.push(GitBranch {
-            name: name.to_string(),
-            commit: commit.to_string(),
-            current: head == "*",
+            name: fields.get(1).copied().unwrap_or("").to_string(),
+            commit: fields.get(2).copied().unwrap_or("").to_string(),
+            current: fields.first().copied() == Some("*"),
+            upstream: if upstream.is_empty() { None } else { Some(upstream.to_string()) },
         });
     }
     branches
 }
 
-/// Parse the unit-separated `git log` format.
+/// Parse the `%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e` log format: records end with `\x1e`, fields with `\x1f`, so a multi-line
+/// body belongs to its own commit.
 pub(crate) fn parse_log(out: &str) -> Vec<GitCommit> {
     let mut commits = Vec::new();
-    for line in out.split('\n') {
-        if line.trim().is_empty() {
+    for rec in out.split('\x1e') {
+        let rec = rec.trim_start_matches('\n');
+        if rec.is_empty() {
             continue;
         }
-        let f: Vec<&str> = line.split('\x1f').collect();
+        let f: Vec<&str> = rec.splitn(6, '\x1f').collect();
         commits.push(GitCommit {
             hash: f.first().copied().unwrap_or("").to_string(),
             author: f.get(1).copied().unwrap_or("").to_string(),
             email: f.get(2).copied().unwrap_or("").to_string(),
             date: f.get(3).copied().unwrap_or("").to_string(),
             message: f.get(4).copied().unwrap_or("").to_string(),
+            body: f.get(5).copied().unwrap_or("").trim_end_matches('\n').to_string(),
         });
     }
     commits
@@ -545,7 +560,7 @@ mod tests {
             "?? new.txt",
             "",
         ]
-        .join("\n");
+        .join("\0");
         let stub = StubGit::new(move |args| {
             if args[0] == "status" {
                 return StubGit::ok(&fixture);
@@ -555,6 +570,7 @@ mod tests {
         let git = Git::new(&stub);
         let st = git.status(Some("/repo")).await.unwrap();
         assert_eq!(st.branch, "main");
+        assert_eq!(st.upstream.as_deref(), Some("origin/main"));
         assert_eq!(st.ahead, 2);
         assert_eq!(st.behind, 1);
         assert!(!st.detached);
@@ -568,7 +584,7 @@ mod tests {
     async fn status_clean_detached_head() {
         let stub = StubGit::new(|args| {
             if args[0] == "status" {
-                return StubGit::ok("## HEAD (no branch)\n");
+                return StubGit::ok("## HEAD (no branch)\0");
             }
             StubGit::ok("")
         });
@@ -583,7 +599,7 @@ mod tests {
     async fn status_fresh_repo_no_commits() {
         let stub = StubGit::new(|args| {
             if args[0] == "status" {
-                return StubGit::ok("## No commits yet on trunk\n?? a.txt\n");
+                return StubGit::ok("## No commits yet on trunk\0?? a.txt\0");
             }
             StubGit::ok("")
         });
@@ -596,8 +612,8 @@ mod tests {
     #[tokio::test]
     async fn branches_parses_name_commit_current() {
         let stub = StubGit::new(|args| {
-            if args[0] == "branch" {
-                return StubGit::ok("*\x1fmain\x1fabc1234\n \x1fdev\x1fdef5678\n");
+            if args[0] == "for-each-ref" {
+                return StubGit::ok("*\x1fmain\x1fabc1234\x1forigin/main\n \x1fdev\x1fdef5678\x1f\n");
             }
             StubGit::ok("")
         });
@@ -606,8 +622,8 @@ mod tests {
         assert_eq!(
             branches,
             vec![
-                GitBranch { name: "main".into(), commit: "abc1234".into(), current: true },
-                GitBranch { name: "dev".into(), commit: "def5678".into(), current: false },
+                GitBranch { name: "main".into(), commit: "abc1234".into(), current: true, upstream: Some("origin/main".into()) },
+                GitBranch { name: "dev".into(), commit: "def5678".into(), current: false, upstream: None },
             ]
         );
         let calls = stub.calls.lock().unwrap();
@@ -619,8 +635,8 @@ mod tests {
         let stub = StubGit::new(|args| {
             if args[0] == "log" {
                 return StubGit::ok(
-                    "h1\x1fAda\x1fada@x\x1f2026-01-01T00:00:00+00:00\x1ffirst\n\
-                     h2\x1fLin\x1flin@x\x1f2026-01-02T00:00:00+00:00\x1fsecond\n",
+                    "h1\x1fAda\x1fada@x\x1f2026-01-01T00:00:00+00:00\x1ffirst\x1fbody 1\nline 2\n\x1e\n\
+                     h2\x1fLin\x1flin@x\x1f2026-01-02T00:00:00+00:00\x1fsecond\x1f\n\x1e\n",
                 );
             }
             StubGit::ok("")
@@ -636,8 +652,11 @@ mod tests {
                 email: "ada@x".into(),
                 date: "2026-01-01T00:00:00+00:00".into(),
                 message: "first".into(),
+                body: "body 1\nline 2".into(),
             }
         );
+        assert_eq!(log[1].message, "second");
+        assert_eq!(log[1].body, "");
     }
 
     #[tokio::test]

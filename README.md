@@ -134,8 +134,8 @@ cargo test
 ### Conformance
 
 `tests/conformance.rs` runs the cross-language conformance rows (`tests/conformance/spec/`, the same rows every Solari SDK runs)
-against this SDK through a mock gateway (`tests/conformance/mock-server.mjs`, so `node` 18+ must be on `PATH`). 9 of the 32
-abstract ops are supported by this SDK; the other 22 are listed with a reason in `tests/conformance/unsupported.json`. A row this SDK
+against this SDK through a mock gateway (`tests/conformance/mock-server.mjs`, so `node` 18+ must be on `PATH`). 12 of the 35
+abstract ops are supported by this SDK; the others are listed with a reason in `tests/conformance/unsupported.json`. A row this SDK
 currently fails is listed in `tests/conformance/knownGaps.json` and must keep failing until the entry is deleted.
 `tests/conformance/SOURCE.txt` pins where the vendored files come from; `tests/conformance/check-source.sh` fails if a copy was edited.
 One live smoke row (`live_conformance_smoke_create_get_kill_gone`: create, get, kill, then 404) is in `tests/live.rs`; it runs on

@@ -349,13 +349,36 @@ pub struct RunCodeResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitStatus {
     pub branch: String,
+    /// The upstream branch (`origin/main`), when one is configured (also when it is gone).
+    pub upstream: Option<String>,
     pub detached: bool,
     pub ahead: i64,
     pub behind: i64,
+    /// Paths with a staged change (index column not blank); a rename is its NEW path. Not a conflicted path.
     pub staged: Vec<String>,
+    /// Paths with an unstaged change (worktree column not blank). Not a conflicted path.
     pub modified: Vec<String>,
+    /// Untracked files, one per file (never a bare directory).
     pub untracked: Vec<String>,
+    /// Paths in an unmerged state (`DD AU UD UA DU AA UU`), each listed once and only here.
+    pub conflicted: Vec<String>,
+    /// Every record `git status` printed, in order, with its two status columns.
+    pub entries: Vec<GitStatusEntry>,
+    /// True when there are no entries at all.
     pub clean: bool,
+}
+
+/// One `git status --porcelain=v1 -z` record.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitStatusEntry {
+    /// The path, verbatim (not quoted or escaped); for a rename or copy the NEW path.
+    pub path: String,
+    /// The old path of a rename or copy.
+    pub orig_path: Option<String>,
+    /// The index (staged) column: `' '`, `M`, `A`, `D`, `R`, `C`, `U`, or `?` for an untracked file.
+    pub index: char,
+    /// The worktree (unstaged) column, same alphabet.
+    pub worktree: char,
 }
 
 /// One branch entry (`git.branches`).
@@ -364,6 +387,8 @@ pub struct GitBranch {
     pub name: String,
     pub commit: String,
     pub current: bool,
+    /// The upstream branch, when one is set.
+    pub upstream: Option<String>,
 }
 
 /// One commit record (`git.log`).
@@ -373,5 +398,8 @@ pub struct GitCommit {
     pub author: String,
     pub email: String,
     pub date: String,
+    /// The subject line.
     pub message: String,
+    /// The rest of the message, without trailing newlines; empty when there is none.
+    pub body: String,
 }

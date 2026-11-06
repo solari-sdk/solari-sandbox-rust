@@ -46,7 +46,7 @@ pub use git::{
 pub use http::{new_idempotency_key, HttpOptions, HttpTransport};
 pub use types::{
     Chart, ChartAxis, ChartType, CodeResultItem, CommandResult, CreateSandboxRequest,
-    CreateSandboxResponse, FsEntry, FsStat, GatewayErrorBody, GitBranch, GitCommit, GitStatus,
+    CreateSandboxResponse, FsEntry, FsStat, GatewayErrorBody, GitBranch, GitCommit, GitStatus, GitStatusEntry,
     Lifecycle, ResumeResponse, RunCodeResult, SandboxView, StartResponse, VolumeAttachment,
 };
 

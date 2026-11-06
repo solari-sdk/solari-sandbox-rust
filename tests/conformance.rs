@@ -174,8 +174,8 @@ fn handle_view(s: &solari::Sandbox) -> Value {
     v
 }
 
-const SUPPORTED: [&str; 9] =
-    ["commands.run", "sandbox.create", "sandbox.createDesktop", "sandbox.get", "sandbox.pause", "sandbox.resume", "sandbox.start", "sandbox.kill", "sandbox.connect"];
+const SUPPORTED: [&str; 12] =
+    ["git.status", "git.branches", "git.log", "commands.run", "sandbox.create", "sandbox.createDesktop", "sandbox.get", "sandbox.pause", "sandbox.resume", "sandbox.start", "sandbox.kill", "sandbox.connect"];
 
 /// Run one op against `base_url`. Returns `{result}` or `{error}`; never panics on an SDK error. A handle op first creates a
 /// sandbox (the row's mock lists that exchange).
@@ -193,6 +193,37 @@ async fn run_op(op: &str, input: &Value, base_url: &str) -> Value {
                     r["controlUrl"] = json!(u);
                 }
                 Ok(r)
+            }
+            "git.status" | "git.branches" | "git.log" => {
+                let s = c.create(CreateOptions { template: Some("base".into()), ..Default::default() }).await?;
+                let cwd = input.get("cwd").and_then(Value::as_str).map(String::from);
+                let g = s.git();
+                match op {
+                    "git.status" => {
+                        let st = g.status(cwd.as_deref()).await?;
+                        Ok(json!({
+                            "branch": st.branch, "upstream": st.upstream, "detached": st.detached, "ahead": st.ahead, "behind": st.behind,
+                            "staged": st.staged, "modified": st.modified, "untracked": st.untracked, "conflicted": st.conflicted, "clean": st.clean,
+                            "entries": st.entries.iter().map(|e| {
+                                let mut v = json!({ "path": e.path, "index": e.index.to_string(), "worktree": e.worktree.to_string() });
+                                if let Some(o) = &e.orig_path { v["origPath"] = json!(o); }
+                                v
+                            }).collect::<Vec<_>>(),
+                        }))
+                    }
+                    "git.branches" => {
+                        let bs = g.branches(cwd.as_deref()).await?;
+                        Ok(json!({ "list": bs.iter().map(|b| {
+                            let mut v = json!({ "name": b.name, "commit": b.commit, "current": b.current });
+                            if let Some(u) = &b.upstream { v["upstream"] = json!(u); }
+                            v
+                        }).collect::<Vec<_>>() }))
+                    }
+                    _ => {
+                        let log = g.log(solari::GitLogOptions { cwd, max_count: input.get("maxCount").and_then(Value::as_i64).map(|n| n as _) }).await?;
+                        Ok(json!({ "list": log.iter().map(|c| json!({ "hash": c.hash, "author": c.author, "email": c.email, "date": c.date, "message": c.message, "body": c.body })).collect::<Vec<_>>() }))
+                    }
+                }
             }
             "commands.run" => {
                 let s = c.create(CreateOptions { template: Some("base".into()), ..Default::default() }).await?;

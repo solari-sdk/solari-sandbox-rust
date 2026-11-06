@@ -5,7 +5,7 @@
 import { loadSpec, resolveRefs } from "./lib/spec.mjs";
 
 const rows = [];
-for (const f of ["spec/wire", "spec/errors", "spec/retry", "spec/commands", "local/binary"]) {
+for (const f of ["spec/wire", "spec/errors", "spec/retry", "spec/commands", "local/binary", "local/git"]) {
   const spec = loadSpec(new URL(`./${f}.json`, import.meta.url));
   if (spec.errors.length) throw new Error(`${f}.json is invalid: ${spec.errors.join("; ")}`);
   for (const [group, list] of Object.entries(spec.groups)) {
