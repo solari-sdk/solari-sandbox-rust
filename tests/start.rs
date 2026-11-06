@@ -82,7 +82,11 @@ async fn start_surfaces_each_409_code() {
         let body = format!(r#"{{"code":"{code}","error":"refused","state":"paused","retryable":false}}"#);
         let (port, _) = mock(409, &body).await;
         match client(port).start("sbx1").await {
-            Err(SolariError::Gateway { status: 409, code: Some(c), .. }) => assert_eq!(c, code),
+            Err(SolariError::SandboxNotStopped { status: 409, code: Some(c), state: Some(st), .. }) if code == "NotStopped" || code == "StartInProgress" => {
+                assert_eq!(c, code);
+                assert_eq!(st, "paused", "{code}: the sandbox state rides along");
+            }
+            Err(SolariError::Gateway { status: 409, code: Some(c), .. }) if code != "NotStopped" && code != "StartInProgress" => assert_eq!(c, code),
             other => panic!("{code}: unexpected {other:?}"),
         }
     }

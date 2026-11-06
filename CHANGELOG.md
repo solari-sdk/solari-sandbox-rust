@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+- **`SolariError::SandboxNotStopped { status, message, code, state }`** is returned for a 409 `NotStopped` or `StartInProgress` from `Client::start()` / `Sandbox::start()`. `code` is `"NotStopped"` (the sandbox is in another state; use `resume()` for a paused one) or `"StartInProgress"` (a start is already under way: poll until the sandbox is running), and `state` holds the sandbox's current state when the gateway sends it. Other 409s (`StoppedDiskMissing`, `GoldenMismatch`, `HostCapabilityMissing`, `SnapshotNotRestorable`, ...) stay `SolariError::Gateway`. This is the same type the TypeScript and Python SDKs expose as `SandboxNotStoppedError`.
+
+### Changed
+- A new enum variant is a breaking change for code that matches `SolariError` exhaustively, hence 0.4.0. `SolariError::status()` returns `Some(409)` for the new variant; a catch-all arm or a `Gateway` arm that matched these two codes needs the new arm.
+
 ## 0.3.4
 
 ### Fixed

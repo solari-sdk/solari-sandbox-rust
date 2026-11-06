@@ -117,7 +117,8 @@ async fn main() -> Result<(), solari::SolariError> {
 
 Every fallible method returns `Result<T, SolariError>`. Variants mirror the
 reference hierarchy: `Auth` (401/403), `Plan` (402), `ConcurrencyLimit` (429,
-not retryable), `NoCapacity` (503), `Gateway` (other non-2xx), `Action` (a
+not retryable), `NoCapacity` (503), `SandboxNotStopped` (409 `NotStopped` / `StartInProgress` from
+`start`; `code` says which, `state` is the sandbox state when sent), `Gateway` (other non-2xx), `Action` (a
 control-WS RPC replied `ok:false`), `Timeout`, `Connection`, and `Git`.
 
 ## Testing

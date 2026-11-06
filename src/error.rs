@@ -36,6 +36,14 @@ pub enum SolariError {
     #[error("{message}")]
     NoCapacity { status: u16, message: String, code: Option<String> },
 
+    /// HTTP 409 `NotStopped` or `StartInProgress` from `start`. `NotStopped`: the sandbox is in another state (use `resume()` for a
+    /// paused one). `StartInProgress`: a start is already under way, so poll until the sandbox is running. Not retryable as-is.
+    /// `code` says which, and `state` is the sandbox's current state when the gateway reports it. Host refusals
+    /// (`StoppedDiskMissing`, `GoldenMismatch`, `HostCapabilityMissing`, ...) stay `Gateway` errors with the host's `code`.
+    /// The same type the TypeScript and Python SDKs expose as `SandboxNotStoppedError`.
+    #[error("{message}")]
+    SandboxNotStopped { status: u16, message: String, code: Option<String>, state: Option<String> },
+
     /// Any other non-2xx gateway response (incl. 404/405/409/501).
     #[error("{message}")]
     Gateway { status: u16, message: String, code: Option<String> },
@@ -78,6 +86,7 @@ impl SolariError {
             | SolariError::Plan { status, .. }
             | SolariError::ConcurrencyLimit { status, .. }
             | SolariError::NoCapacity { status, .. }
+            | SolariError::SandboxNotStopped { status, .. }
             | SolariError::Gateway { status, .. } => Some(*status),
             _ => None,
         }
@@ -88,6 +97,7 @@ impl SolariError {
 /// generic `Gateway` for unrecognized statuses. Mirrors `mapGatewayError`.
 pub(crate) fn map_gateway_error(status: u16, body: Option<GatewayErrorBody>) -> SolariError {
     let code = body.as_ref().and_then(|b| b.code.clone());
+    let state = body.as_ref().and_then(|b| b.state.clone());
     let message = body
         .as_ref()
         .and_then(|b| b.message.clone().or_else(|| b.error.clone()).or_else(|| b.code.clone()))
@@ -99,6 +109,7 @@ pub(crate) fn map_gateway_error(status: u16, body: Option<GatewayErrorBody>) -> 
         (402, _) => SolariError::Plan { status, message, code },
         // The gateway's only JSON 403 is NotEntitled (the plan does not include sandboxes/desktops).
         (403, Some("NotEntitled")) => SolariError::Plan { status, message, code },
+        (409, Some("NotStopped" | "StartInProgress")) => SolariError::SandboxNotStopped { status, message, code, state },
         (429, None | Some("ConcurrencyLimitExceeded")) => SolariError::ConcurrencyLimit { status, message, code },
         (503, None | Some("NoCapacity" | "StartTimeout")) => SolariError::NoCapacity { status, message, code },
         _ => SolariError::Gateway { status, message, code },
@@ -161,6 +172,7 @@ mod tests {
         Plan,
         Concurrency,
         NoCapacity,
+        NotStopped,
         Plain,
     }
 
@@ -170,6 +182,7 @@ mod tests {
             SolariError::Plan { .. } => Kind::Plan,
             SolariError::ConcurrencyLimit { .. } => Kind::Concurrency,
             SolariError::NoCapacity { .. } => Kind::NoCapacity,
+            SolariError::SandboxNotStopped { .. } => Kind::NotStopped,
             SolariError::Gateway { .. } => Kind::Plain,
             other => panic!("not a gateway error: {other:?}"),
         }
@@ -186,6 +199,10 @@ mod tests {
             ("403-other", 403, Some("Forbidden"), Kind::Plain),
             ("404", 404, Some("NotFound"), Kind::Plain),
             ("409-sandbox-stopped", 409, Some("SandboxStopped"), Kind::Plain),
+            ("409-not-stopped", 409, Some("NotStopped"), Kind::NotStopped),
+            ("409-start-in-progress", 409, Some("StartInProgress"), Kind::NotStopped),
+            ("409-host-capability-missing", 409, Some("HostCapabilityMissing"), Kind::Plain),
+            ("409-snapshot-not-restorable", 409, Some("SnapshotNotRestorable"), Kind::Plain),
             ("410-gone", 410, Some("SandboxGone"), Kind::Plain),
             ("429-concurrency-cap", 429, Some("ConcurrencyLimitExceeded"), Kind::Concurrency),
             ("429-no-code", 429, None, Kind::Concurrency),
@@ -212,10 +229,23 @@ mod tests {
                 | SolariError::Plan { code, .. }
                 | SolariError::ConcurrencyLimit { code, .. }
                 | SolariError::NoCapacity { code, .. }
+                | SolariError::SandboxNotStopped { code, .. }
                 | SolariError::Gateway { code, .. } => code.clone(),
                 _ => unreachable!(),
             };
             assert_eq!(kept.as_deref(), *code, "errors/{id}: the gateway's code is kept");
         }
+    }
+
+    /// `state` rides along on a NotStopped refusal when the gateway reports it, and is absent otherwise.
+    #[test]
+    fn not_stopped_carries_the_sandbox_state() {
+        let body = GatewayErrorBody { code: Some("NotStopped".into()), state: Some("paused".into()), ..Default::default() };
+        match map_gateway_error(409, Some(body)) {
+            SolariError::SandboxNotStopped { status: 409, state: Some(s), .. } => assert_eq!(s, "paused"),
+            other => panic!("unexpected {other:?}"),
+        }
+        let body = GatewayErrorBody { code: Some("StartInProgress".into()), ..Default::default() };
+        assert!(matches!(map_gateway_error(409, Some(body)), SolariError::SandboxNotStopped { state: None, .. }));
     }
 }
