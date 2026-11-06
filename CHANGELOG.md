@@ -10,6 +10,8 @@
 - `CommandResult` gained fields, so code that builds one with a struct literal needs `..Default::default()`.
 
 ### Added
+- **`user` is validated before any transport is chosen.** A `user` that is neither `root` nor a unix user name (`^[a-z_][a-z0-9_-]{0,31}$`) fails with `SolariError::Validation` before any request, the same error the gateway's `/exec` route gives, instead of reaching the guest on the live connection. `timeout_ms` is an unsigned integer here, so a negative deadline cannot be written.
+- **A `409 HostCapabilityMissing` from `/exec` is retried once on the live connection.** It means the host pool lacks `exec.user` for the sandbox's default user and nothing ran; the live connection reaches the guest directly, which honours `user`.
 - **`CommandResult::oom_killed`**: true when the guest's memory watchdog killed the command (exit 137 alone is ambiguous). Always present.
 - **`CommandResult::stdout_bytes` / `stderr_bytes`**: the exact output bytes. `stdout` / `stderr` stay UTF-8 text (invalid bytes become U+FFFD); a command that prints binary data is read from the byte fields. They are exact on the live connection; on `/exec` the gateway has already turned the output into text, so they are the bytes of that text.
 - **`SolariError::ExecInterrupted`** for `409 ExecInterrupted` (the sandbox was parked while the command ran, so it may have partly run). It is never retried and never re-run on the live connection: exactly one `/exec` request.

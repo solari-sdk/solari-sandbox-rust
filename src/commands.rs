@@ -434,6 +434,9 @@ pub(crate) async fn run_command(
     cmd: &str,
     opts: &RunOptions,
 ) -> Result<CommandResult, SolariError> {
+    // Validated BEFORE a transport is chosen, with the gateway's own wording, so a bad value fails the same way whether the
+    // command would have gone over `/exec` (which answers 400 ValidationError) or the live connection (which accepts anything).
+    validate_user(opts.user.as_deref())?;
     // One-shot HTTP fast path: a plain run-to-completion (no streaming
     // callbacks, not backgrounded, no per-command env/user) over the warm REST
     // connection, when the control channel isn't already open. A shared sandbox
@@ -447,10 +450,12 @@ pub(crate) async fn run_command(
     if rest_eligible && (!sb.channel().connected() || sb.is_shared()) {
         match exec_oneshot(sb, cmd, opts).await {
             Ok(r) => return Ok(r),
-            // Fall back to the WS path ONLY when `/exec` is unavailable. Any
-            // other failure propagates (never silently double-execute).
+            // Fall back to the WS path ONLY when `/exec` is unavailable, or when the host refused with
+            // `409 HostCapabilityMissing` (its pool lacks `exec.user` for the sandbox's default user: nothing ran, and the live
+            // connection reaches the guest directly, which honours `user`). Any other failure propagates (never silently
+            // double-execute).
             Err(err) => {
-                if !is_route_unavailable(&err) {
+                if !is_route_unavailable(&err) && !is_exec_user_capability_missing(&err) {
                     return Err(err);
                 }
             }
@@ -493,6 +498,28 @@ pub(crate) async fn run_command(
     let result = handle.wait_deadline(deadline).await;
     guard.io = None; // finished (or failed) on its own: nothing to stop
     result
+}
+
+/// `user` must be `root` or a unix user name; the gateway's `/exec` route answers 400 ValidationError otherwise.
+fn validate_user(user: Option<&str>) -> Result<(), SolariError> {
+    let Some(u) = user else { return Ok(()) };
+    let ok = u == "root" || {
+        let b = u.as_bytes();
+        !b.is_empty()
+            && b.len() <= 32
+            && (b[0].is_ascii_lowercase() || b[0] == b'_')
+            && b[1..].iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(SolariError::Validation { message: "user: must be a unix user name or root".into() })
+    }
+}
+
+/// The one `/exec` refusal that proves nothing ran: the host pool lacks the `exec.user` capability.
+fn is_exec_user_capability_missing(err: &SolariError) -> bool {
+    matches!(err, SolariError::Gateway { status: 409, code: Some(c), .. } if c == "HostCapabilityMissing")
 }
 
 /// POST `/sandboxes/:id/exec` — the one-shot fast path.

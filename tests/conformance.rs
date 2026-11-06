@@ -103,6 +103,8 @@ fn normalize_error(e: &SolariError) -> Value {
         SolariError::SandboxNotStopped { status, code, .. } => ("not_stopped", Some(*status), code.clone()),
         SolariError::Gateway { status, code, .. } => ("gateway", Some(*status), code.clone()),
         SolariError::ExecInterrupted { status, code, .. } => ("gateway", Some(*status), code.clone()),
+        // The gateway answers a bad value 400 ValidationError; the SDK raises the same class before any request.
+        SolariError::Validation { .. } => ("validation", Some(400), Some("ValidationError".to_string())),
         SolariError::Action { code, .. } => ("action", None, code.clone()),
         SolariError::Connection { .. } => ("connection", None, None),
         _ => ("other", None, None),
@@ -194,8 +196,14 @@ async fn run_op(op: &str, input: &Value, base_url: &str) -> Value {
                 if let Some(a) = input.get("args").and_then(Value::as_array) {
                     o = o.args(a.iter().map(|x| x.as_str().unwrap().to_string()));
                 }
-                if let Some(t) = input.get("timeoutMs").and_then(Value::as_u64) {
-                    o.timeout_ms = Some(t);
+                match input.get("timeoutMs").and_then(Value::as_i64) {
+                    Some(t) if t >= 0 => o.timeout_ms = Some(t as u64),
+                    // timeout_ms is an unsigned integer: a negative value cannot be written, so there is nothing to reject.
+                    Some(_) => return Err(SolariError::Other("negative timeoutMs cannot be expressed".into())),
+                    None => {}
+                }
+                if let Some(u) = input.get("user").and_then(Value::as_str) {
+                    o.user = Some(u.to_string());
                 }
                 // via "ws": a non-empty env forces the live control connection; via "rest": nothing does (no channel, no env).
                 if input.get("via").and_then(Value::as_str) == Some("ws") {

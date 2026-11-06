@@ -1641,6 +1641,268 @@
         "requests": 2,
         "wsCalls": 0
       }
+    },
+    {
+      "id": "run-bad-user-rejected-before-transport",
+      "op": "commands.run",
+      "why": "an invalid `user` fails the same way on every path: ValidationError raised by the SDK before any request (the gateway's REST route says 400 ValidationError with this text)",
+      "input": {
+        "via": "rest",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000,
+        "user": "Bad User!"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "validation",
+          "status": 400,
+          "code": "ValidationError"
+        },
+        "requests": 1,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-negative-timeout-rejected-before-transport",
+      "op": "commands.run",
+      "why": "an invalid timeoutMs fails the same way on every path: ValidationError raised by the SDK before any exec request",
+      "input": {
+        "via": "rest",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": -5
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "validation",
+          "status": 400,
+          "code": "ValidationError"
+        },
+        "requests": 1,
+        "wsCalls": 0
+      }
+    },
+    {
+      "id": "run-rest-host-capability-missing-falls-back-once",
+      "op": "commands.run",
+      "why": "409 HostCapabilityMissing from /exec (the host pool lacks exec.user for the sandbox's default user) proves nothing ran: the command is retried ONCE on the live connection, which honours the user",
+      "input": {
+        "via": "rest",
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "echo",
+              "timeoutMs": 5000
+            }
+          },
+          "reply": {
+            "status": 409,
+            "body": {
+              "code": "HostCapabilityMissing",
+              "error": "host pool lacks exec.user",
+              "missingCapabilities": [
+                "exec.user"
+              ],
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "aGkK"
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "hi\n",
+          "timedOut": false,
+          "oomKilled": false
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "run-cancellable-call-uses-the-live-connection",
+      "op": "commands.runCancellable",
+      "why": "R4: aborting a one-shot POST /exec leaves the guest process running (the gateway does not kill it), so a call the caller can cancel must run on the live connection, where cancel sends cmd.kill; the cancellable call makes NO /exec request",
+      "input": {
+        "cmd": "echo",
+        "args": [
+          "hi"
+        ],
+        "timeoutMs": 5000
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "ws": [
+        {
+          "expect": {
+            "method": "cmd.start",
+            "params": {
+              "cmd": "echo",
+              "args": [
+                "hi"
+              ]
+            }
+          },
+          "reply": {
+            "ok": true,
+            "result": {
+              "cmdId": "c1"
+            }
+          },
+          "then": [
+            {
+              "type": "cmd.data",
+              "cmdId": "c1",
+              "stream": "stdout",
+              "base64": "aGkK"
+            },
+            {
+              "type": "cmd.exit",
+              "cmdId": "c1",
+              "exitCode": 0
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "result": {
+          "exitCode": 0,
+          "stdout": "hi\n",
+          "timedOut": false,
+          "oomKilled": false
+        },
+        "requests": 1
+      }
     }
   ]
 }
