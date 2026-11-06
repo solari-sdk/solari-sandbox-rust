@@ -17,10 +17,8 @@ templates.
 
 ## Install
 
-🚨 **CORRECTED 2026-10-04** — this is the in-tree dev-source path from the
-monorepo (`pinetree-desktop/sdk/rust`), not an install for this published
-crate. The published crate name is also `solari-sandbox`, not `solari-sdk`
-(the `[package] name` in `Cargo.toml`).
+🚨 **CORRECTED 2026-10-04** — the published crate is named `solari-sandbox`,
+not `solari-sdk` (the `[package] name` in `Cargo.toml`).
 
 ```toml
 [dependencies]
