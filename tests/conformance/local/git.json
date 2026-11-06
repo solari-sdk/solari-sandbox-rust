@@ -1,0 +1,625 @@
+{
+  "comment": "git.status / branches / log: the exact git invocation and how its output is parsed (audit retest: parsing was lossy in every SDK). The SDK runs `git` through commands.run (REST /exec here); the rows script git's stdout.",
+  "git": [
+    {
+      "id": "status-verbatim-paths-rename-conflict-untracked",
+      "op": "git.status",
+      "input": {
+        "cwd": "/repo"
+      },
+      "why": "git status is requested with -z (verbatim paths) and --untracked-files=all; spaces/non-ASCII are NOT quoted, a rename is the new path with origPath, a conflict is listed once as conflicted, an untracked directory lists its files",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--branch",
+                "--untracked-files=all"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "## main...origin/main [ahead 1, behind 2]\u0000 M a b.txt\u0000R  new name\u0000old name\u0000UU conflict\u0000A  é ü.txt\u0000?? nd/inner\u0000?? nd/deep file\u0000",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "branch": "main",
+          "upstream": "origin/main",
+          "ahead": 1,
+          "behind": 2,
+          "detached": false,
+          "staged": [
+            "new name",
+            "é ü.txt"
+          ],
+          "modified": [
+            "a b.txt"
+          ],
+          "conflicted": [
+            "conflict"
+          ],
+          "untracked": [
+            "nd/inner",
+            "nd/deep file"
+          ],
+          "clean": false,
+          "entries": [
+            {
+              "path": "a b.txt",
+              "index": " ",
+              "worktree": "M"
+            },
+            {
+              "path": "new name",
+              "origPath": "old name",
+              "index": "R",
+              "worktree": " "
+            },
+            {
+              "path": "conflict",
+              "index": "U",
+              "worktree": "U"
+            },
+            {
+              "path": "é ü.txt",
+              "index": "A",
+              "worktree": " "
+            },
+            {
+              "path": "nd/inner",
+              "index": "?",
+              "worktree": "?"
+            },
+            {
+              "path": "nd/deep file",
+              "index": "?",
+              "worktree": "?"
+            }
+          ]
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "status-detached-head",
+      "op": "git.status",
+      "input": {
+        "cwd": "/repo"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--branch",
+                "--untracked-files=all"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "## HEAD (no branch)\u0000",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "detached": true,
+          "branch": "",
+          "clean": true,
+          "entries": []
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "status-fresh-repo",
+      "op": "git.status",
+      "input": {
+        "cwd": "/repo"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--branch",
+                "--untracked-files=all"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "## No commits yet on trunk\u0000?? a.txt\u0000",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "branch": "trunk",
+          "untracked": [
+            "a.txt"
+          ],
+          "clean": false
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "status-upstream-gone",
+      "op": "git.status",
+      "input": {
+        "cwd": "/repo"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--branch",
+                "--untracked-files=all"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "## main...origin/main [gone]\u0000",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "branch": "main",
+          "upstream": "origin/main",
+          "ahead": 0,
+          "behind": 0,
+          "clean": true
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "branches-real-branches-only",
+      "op": "git.branches",
+      "input": {
+        "cwd": "/repo"
+      },
+      "why": "for-each-ref refs/heads lists real branches only (a detached HEAD is not a branch; none is current); upstream is reported",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "for-each-ref",
+                "--format=%(HEAD)%1f%(refname:short)%1f%(objectname:short)%1f%(upstream:short)",
+                "refs/heads"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": " \u001ffeat/x\u001fabc1234\u001f\n \u001fmain\u001fdef5678\u001forigin/main\n",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "list": [
+            {
+              "name": "feat/x",
+              "commit": "abc1234",
+              "current": false
+            },
+            {
+              "name": "main",
+              "commit": "def5678",
+              "current": false,
+              "upstream": "origin/main"
+            }
+          ]
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "branches-current-marked",
+      "op": "git.branches",
+      "input": {
+        "cwd": "/repo"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "for-each-ref",
+                "--format=%(HEAD)%1f%(refname:short)%1f%(objectname:short)%1f%(upstream:short)",
+                "refs/heads"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "*\u001fmain\u001fdef5678\u001f\n",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "list": [
+            {
+              "name": "main",
+              "commit": "def5678",
+              "current": true
+            }
+          ]
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "log-keeps-subject-and-body",
+      "op": "git.log",
+      "input": {
+        "cwd": "/repo",
+        "maxCount": 2
+      },
+      "why": "records end with \\x1e, fields with \\x1f: a multi-line body is part of its commit; message = subject, body = the rest",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "log",
+                "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e",
+                "--max-count=2"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "h1\u001fAda\u001fada@x\u001f2026-01-01T00:00:00+00:00\u001ffirst\u001fbody 1\nline 2\n\u001e\nh2\u001fLin\u001flin@x\u001f2026-01-02T00:00:00+00:00\u001fsecond\u001f\n\u001e\n",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "list": [
+            {
+              "hash": "h1",
+              "author": "Ada",
+              "email": "ada@x",
+              "message": "first",
+              "body": "body 1\nline 2"
+            },
+            {
+              "hash": "h2",
+              "author": "Lin",
+              "email": "lin@x",
+              "message": "second",
+              "body": ""
+            }
+          ]
+        },
+        "requests": 2
+      }
+    },
+    {
+      "id": "log-empty-repository-is-empty",
+      "op": "git.log",
+      "input": {
+        "cwd": "/repo"
+      },
+      "why": "a repository with no commit has an empty history, not an error",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "log",
+                "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 128,
+              "stdout": "",
+              "stderr": "fatal: your current branch 'main' does not have any commits yet\n",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "list": []
+        },
+        "requests": 2
+      }
+    }
+  ]
+}

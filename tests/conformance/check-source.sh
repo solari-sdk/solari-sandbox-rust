@@ -3,7 +3,7 @@
 # vendored file is not listed. Offline. To repin, copy the files from the new desktop sha and run:  ./check-source.sh --write <sha>
 set -euo pipefail
 cd "$(dirname "$0")"
-FILES=(README.md mock-server.mjs lib/mock-server.mjs lib/spec.mjs schema/row.schema.json spec/errors.json spec/gateway-responses.json spec/retry.json spec/wire.json)
+FILES=(README.md mock-server.mjs lib/mock-server.mjs lib/spec.mjs schema/row.schema.json spec/commands.json spec/errors.json spec/gateway-responses.json spec/retry.json spec/wire.json)
 if [[ ${1:-} == --write ]]; then
   { echo "desktop ${2:?usage: --write <sha>}"; sha256sum "${FILES[@]}" | sort -k2; } > SOURCE.txt
   echo "SOURCE.txt rewritten"; exit 0

@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 
 const KNOWN_FIELDS = new Set([
-  "id", "op", "input", "expect", "mock", "live", "why", "description", // this suite
+  "id", "op", "input", "expect", "mock", "ws", "live", "why", "description", // this suite
   "env", "options", "needsVendorUrl", "exceptions", "kind", "status", // compat-harness rows, as they are
 ]);
 
@@ -52,6 +52,7 @@ export function parseSpec(doc, label = "spec") {
       }
       if ("live" in row && typeof row.live !== "boolean") errors.push(`${where} (${row.id}): live must be a boolean`);
       if ("mock" in row) for (const e of validateMock(row.mock)) errors.push(`${where} (${row.id}): mock ${e}`);
+      if ("ws" in row) for (const e of validateWs(row.ws)) errors.push(`${where} (${row.id}): ws ${e}`);
       for (const ref of collectRefs(row)) {
         if (!gatewayResponseIds().has(ref.replace(/^gateway:/, "")) || !ref.startsWith("gateway:")) errors.push(`${where} (${row.id}): unresolved reference ${JSON.stringify(ref)}`);
       }
@@ -102,6 +103,21 @@ export function validateMock(mock) {
       errors.push(`${w}.reply.status must be an HTTP status (or reply a "gateway:<id>" reference, or { drop: true })`);
     }
     if (ex.times !== undefined && (!Number.isInteger(ex.times) || ex.times < 1)) errors.push(`${w}.times must be a positive integer`);
+  });
+  return errors;
+}
+
+/** Scripted control-WebSocket steps: each client request consumes the next step, which answers it and may push async frames. */
+export function validateWs(ws) {
+  const errors = [];
+  if (!Array.isArray(ws) || ws.length === 0) return ["must be a non-empty array"];
+  ws.forEach((st, i) => {
+    const w = `[${i}]`;
+    if (!st || typeof st !== "object") return errors.push(`${w}: must be an object`);
+    if (typeof st.expect?.method !== "string") errors.push(`${w}.expect.method must be a string (e.g. "cmd.start")`);
+    if (st.reply !== undefined && typeof st.reply.ok !== "boolean") errors.push(`${w}.reply.ok must be a boolean`);
+    if (st.then !== undefined && !Array.isArray(st.then)) errors.push(`${w}.then must be an array of frames`);
+    if (st.times !== undefined && (!Number.isInteger(st.times) || st.times < 1)) errors.push(`${w}.times must be a positive integer`);
   });
   return errors;
 }

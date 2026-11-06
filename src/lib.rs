@@ -46,7 +46,7 @@ pub use git::{
 pub use http::{new_idempotency_key, HttpOptions, HttpTransport};
 pub use types::{
     Chart, ChartAxis, ChartType, CodeResultItem, CommandResult, CreateSandboxRequest,
-    CreateSandboxResponse, FsEntry, FsStat, GatewayErrorBody, GitBranch, GitCommit, GitStatus,
+    CreateSandboxResponse, FsEntry, FsStat, GatewayErrorBody, GitBranch, GitCommit, GitStatus, GitStatusEntry,
     Lifecycle, ResumeResponse, RunCodeResult, SandboxView, StartResponse, VolumeAttachment,
 };
 
@@ -172,7 +172,7 @@ mod tests {
 
         let started = std::time::Instant::now();
         let mut opts = RunOptions::new().args(["3600"]);
-        opts.timeout_ms = Some(80);
+        opts.timeout_ms = Some(1000); // long enough for the scripted frames to arrive first on a loaded machine
         let out = sbx.commands().run("sleep", opts).await.unwrap();
         assert!(started.elapsed() < std::time::Duration::from_secs(3), "run did not honour timeout_ms");
         assert_eq!(out.exit_code, -1);

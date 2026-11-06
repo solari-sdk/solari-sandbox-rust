@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "id": "commands/run-negative-timeout-rejected-before-transport",
+    "why": "timeout_ms is an unsigned integer in the Rust SDK, so a negative value cannot be written and there is nothing to reject",
+    "closes": "not a defect: this row cannot be expressed in Rust; remove the entry if the row gains an input Rust can express"
+  }
+]

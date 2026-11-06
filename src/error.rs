@@ -44,6 +44,11 @@ pub enum SolariError {
     #[error("{message}")]
     SandboxNotStopped { status: u16, message: String, code: Option<String>, state: Option<String> },
 
+    /// HTTP 409 `ExecInterrupted` from `/exec`: the sandbox was parked while the command ran, so it may have partly run. Never
+    /// retried and never re-run on the live connection (exactly one `/exec` request). Not retryable as-is.
+    #[error("{message}")]
+    ExecInterrupted { status: u16, message: String, code: Option<String> },
+
     /// Any other non-2xx gateway response (incl. 404/405/409/501).
     #[error("{message}")]
     Gateway { status: u16, message: String, code: Option<String> },
@@ -87,6 +92,7 @@ impl SolariError {
             | SolariError::ConcurrencyLimit { status, .. }
             | SolariError::NoCapacity { status, .. }
             | SolariError::SandboxNotStopped { status, .. }
+            | SolariError::ExecInterrupted { status, .. }
             | SolariError::Gateway { status, .. } => Some(*status),
             _ => None,
         }
@@ -109,6 +115,7 @@ pub(crate) fn map_gateway_error(status: u16, body: Option<GatewayErrorBody>) -> 
         (402, _) => SolariError::Plan { status, message, code },
         // The gateway's only JSON 403 is NotEntitled (the plan does not include sandboxes/desktops).
         (403, Some("NotEntitled")) => SolariError::Plan { status, message, code },
+        (409, Some("ExecInterrupted")) => SolariError::ExecInterrupted { status, message, code },
         (409, Some("NotStopped" | "StartInProgress")) => SolariError::SandboxNotStopped { status, message, code, state },
         (429, None | Some("ConcurrencyLimitExceeded")) => SolariError::ConcurrencyLimit { status, message, code },
         (503, None | Some("NoCapacity" | "StartTimeout")) => SolariError::NoCapacity { status, message, code },

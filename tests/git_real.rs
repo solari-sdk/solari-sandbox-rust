@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use base64::Engine;
-use solari::{CommandResult, Git, GitCloneOptions, GitRemoteOptions, GitRunner, SolariError};
+use solari::{CommandResult, Git, GitCloneOptions, GitLogOptions, GitRemoteOptions, GitRunner, SolariError};
 
 const USER: &str = "alice";
 const PASS: &str = "p@ss w0rd/ü";
@@ -75,7 +75,7 @@ impl GitRunner for RealGit {
             exit_code: out.status.code().unwrap_or(-1) as i64,
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-            timed_out: false,
+            timed_out: false, oom_killed: false, ..Default::default()
         };
         Box::pin(async move { Ok(r) })
     }
@@ -311,4 +311,172 @@ async fn a_redirect_to_another_host_never_receives_the_password_and_hostile_urls
         .await;
     assert!(r.is_err() && !mark.exists(), "the --upload-pack option was executed");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---- status / branches / log against REAL git (no stub output) --------------------------------------------------------------
+// The parsers used to lose information: quoted paths, a rename as one "old -> new" string, an untracked directory as "dir/", a
+// conflict listed as staged AND modified, a detached HEAD listed as a branch, log on a repository with no commit failing, and the
+// message body dropped.
+
+fn parse_repo(tag: &str) -> Option<(PathBuf, PathBuf)> {
+    if Command::new("git").arg("--version").output().is_err() {
+        return None;
+    }
+    let d = temp_dir(tag);
+    let home = d.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let repo = d.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    g(&repo, &["init", "-q", "-b", "main"]);
+    g(&repo, &["config", "user.name", "T"]);
+    g(&repo, &["config", "user.email", "t@e.x"]);
+    Some((repo, home))
+}
+
+fn g(repo: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn write(repo: &Path, name: &str, body: &str) {
+    let p = repo.join(name);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(p, body).unwrap();
+}
+
+fn sorted(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn real_git_empty_repository_log_is_empty_and_status_is_clean() {
+    let Some((repo, home)) = parse_repo("empty") else { return };
+    let runner = RealGit { home, argvs: Mutex::new(Vec::new()) };
+    let git = Git::new(&runner);
+    let cwd = repo.to_string_lossy().to_string();
+    assert!(git.log(GitLogOptions { cwd: Some(cwd.clone()), max_count: None }).await.unwrap().is_empty(), "log on a repository with no commit is []");
+    assert!(git.branches(Some(&cwd)).await.unwrap().is_empty());
+    let st = git.status(Some(&cwd)).await.unwrap();
+    assert_eq!(st.branch, "main");
+    assert!(st.clean && st.entries.is_empty());
+}
+
+#[tokio::test]
+async fn real_git_status_paths_are_verbatim_and_untracked_directories_list_their_files() {
+    let Some((repo, home)) = parse_repo("paths") else { return };
+    let runner = RealGit { home, argvs: Mutex::new(Vec::new()) };
+    let git = Git::new(&runner);
+    for (n, b) in [("a b.txt", "1"), ("é ü.txt", "2"), ("tab\there", "3"), ("nd/inner", "n"), ("nd/deep file", "n")] {
+        write(&repo, n, b);
+    }
+    let st = git.status(Some(&repo.to_string_lossy())).await.unwrap();
+    assert_eq!(
+        sorted(st.untracked),
+        sorted(vec!["a b.txt".into(), "é ü.txt".into(), "tab\there".into(), "nd/inner".into(), "nd/deep file".into()]),
+        "verbatim paths (no quotes, no escapes) and files, not 'nd/'"
+    );
+}
+
+#[tokio::test]
+async fn real_git_status_rename_is_the_new_path_with_the_old_path_in_entries() {
+    let Some((repo, home)) = parse_repo("rename") else { return };
+    let runner = RealGit { home, argvs: Mutex::new(Vec::new()) };
+    let git = Git::new(&runner);
+    write(&repo, "plain", "2");
+    write(&repo, "gone me", "1");
+    g(&repo, &["add", "-A"]);
+    g(&repo, &["commit", "-q", "-m", "first"]);
+    write(&repo, "plain", "2\nmore");
+    g(&repo, &["mv", "plain", "renamed file"]);
+    write(&repo, "staged", "s");
+    g(&repo, &["add", "staged"]);
+    g(&repo, &["rm", "-q", "--cached", "gone me"]);
+    let st = git.status(Some(&repo.to_string_lossy())).await.unwrap();
+    assert_eq!(sorted(st.staged.clone()), vec!["gone me".to_string(), "renamed file".into(), "staged".into()]);
+    assert_eq!(st.modified, vec!["renamed file".to_string()], "RM: the rename is staged and the content changed again");
+    let ren = st.entries.iter().find(|e| e.path == "renamed file").unwrap();
+    assert_eq!((ren.orig_path.as_deref(), ren.index, ren.worktree), (Some("plain"), 'R', 'M'));
+    assert!(!st.staged.iter().any(|p| p.contains("->")), "no 'old -> new' strings");
+}
+
+#[tokio::test]
+async fn real_git_status_a_merge_conflict_is_listed_once_as_conflicted() {
+    let Some((repo, home)) = parse_repo("conflict") else { return };
+    let runner = RealGit { home, argvs: Mutex::new(Vec::new()) };
+    let git = Git::new(&runner);
+    write(&repo, "base", "0");
+    g(&repo, &["add", "-A"]);
+    g(&repo, &["commit", "-q", "-m", "base"]);
+    g(&repo, &["checkout", "-q", "-b", "c1"]);
+    write(&repo, "conflict", "A");
+    g(&repo, &["add", "conflict"]);
+    g(&repo, &["commit", "-q", "-m", "c1"]);
+    g(&repo, &["checkout", "-q", "main"]);
+    write(&repo, "conflict", "B");
+    g(&repo, &["add", "conflict"]);
+    g(&repo, &["commit", "-q", "-m", "c2"]);
+    g(&repo, &["merge", "c1"]);
+    let st = git.status(Some(&repo.to_string_lossy())).await.unwrap();
+    assert_eq!(st.conflicted, vec!["conflict".to_string()]);
+    assert!(st.staged.is_empty() && st.modified.is_empty(), "listed once, only as conflicted");
+    assert!(!st.clean);
+}
+
+#[tokio::test]
+async fn real_git_status_detached_head_and_upstream_counts_and_branches() {
+    let Some((repo, home)) = parse_repo("upstream") else { return };
+    let runner = RealGit { home, argvs: Mutex::new(Vec::new()) };
+    let git = Git::new(&runner);
+    let cwd = repo.to_string_lossy().to_string();
+    write(&repo, "f", "1");
+    g(&repo, &["add", "-A"]);
+    g(&repo, &["commit", "-q", "-m", "one"]);
+    g(&repo, &["branch", "feat/x"]);
+    g(&repo, &["branch", "topic"]);
+    g(&repo, &["remote", "add", "origin", repo.to_str().unwrap()]);
+    g(&repo, &["fetch", "-q", "origin"]);
+    g(&repo, &["branch", "--set-upstream-to=origin/main", "main"]);
+    write(&repo, "f", "2");
+    g(&repo, &["commit", "-qam", "two"]);
+    let st = git.status(Some(&cwd)).await.unwrap();
+    assert_eq!((st.branch.as_str(), st.upstream.as_deref(), st.ahead, st.behind), ("main", Some("origin/main"), 1, 0));
+    let bs = git.branches(Some(&cwd)).await.unwrap();
+    assert_eq!(sorted(bs.iter().map(|b| b.name.clone()).collect()), vec!["feat/x".to_string(), "main".into(), "topic".into()]);
+    let main = bs.iter().find(|b| b.name == "main").unwrap();
+    assert!(main.current);
+    assert_eq!(main.upstream.as_deref(), Some("origin/main"));
+    g(&repo, &["checkout", "-q", "--detach", "HEAD~1"]);
+    let st = git.status(Some(&cwd)).await.unwrap();
+    assert!(st.detached && st.branch.is_empty());
+    let bs = git.branches(Some(&cwd)).await.unwrap();
+    assert!(!bs.iter().any(|b| b.name.starts_with('(')), "no '(HEAD detached at ...)' pseudo-branch");
+    assert!(!bs.iter().any(|b| b.current), "nothing is current on a detached HEAD");
+}
+
+#[tokio::test]
+async fn real_git_log_keeps_the_subject_and_the_body() {
+    let Some((repo, home)) = parse_repo("log") else { return };
+    let runner = RealGit { home, argvs: Mutex::new(Vec::new()) };
+    let git = Git::new(&runner);
+    let cwd = repo.to_string_lossy().to_string();
+    write(&repo, "f", "1");
+    g(&repo, &["add", "-A"]);
+    g(&repo, &["commit", "-q", "-m", "subject line", "-m", "body paragraph 1\nsecond line", "-m", "paragraph 2"]);
+    write(&repo, "f", "2");
+    g(&repo, &["commit", "-qam", "plain"]);
+    let log = git.log(GitLogOptions { cwd: Some(cwd.clone()), max_count: None }).await.unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!((log[0].message.as_str(), log[0].body.as_str()), ("plain", ""));
+    assert_eq!(log[1].message, "subject line");
+    assert_eq!(log[1].body, "body paragraph 1\nsecond line\n\nparagraph 2");
+    assert_eq!(git.log(GitLogOptions { cwd: Some(cwd), max_count: Some(1) }).await.unwrap().len(), 1);
 }
