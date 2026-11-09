@@ -177,7 +177,7 @@ pub struct GatewayErrorBody {
 // ---------------------------------------------------------------------------
 
 /// Terminal result of `commands.run` (also the `/exec` fast-path response).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
     #[serde(default)]
@@ -189,6 +189,33 @@ pub struct CommandResult {
     /// True when the command hit its `timeout_ms` and was killed (`exit_code` is -1 then).
     #[serde(default)]
     pub timed_out: bool,
+    /// True when the guest's memory watchdog killed the command (exit 137 alone is ambiguous). Always present; `false` on
+    /// every path that does not report it.
+    #[serde(default)]
+    pub oom_killed: bool,
+    /// The exact stdout bytes. `stdout` is text (UTF-8, invalid bytes replaced by U+FFFD); a command that prints binary data is
+    /// read from here. Exact on the control connection; on the one-shot `/exec` route the gateway has already turned the output
+    /// into text, so these are the bytes of that text (not recoverable from the REST answer).
+    #[serde(skip)]
+    pub stdout_bytes: Vec<u8>,
+    /// The gateway's exact-bytes fields on the `/exec` answer (`stdoutBase64` / `stderrBase64`, sent only when the text is lossy).
+    /// Read into `stdout_bytes` / `stderr_bytes` and cleared; never serialized.
+    #[serde(default, rename = "stdoutBase64", skip_serializing)]
+    #[doc(hidden)]
+    pub stdout_base64: Option<String>,
+    #[serde(default, rename = "stderrBase64", skip_serializing)]
+    #[doc(hidden)]
+    pub stderr_base64: Option<String>,
+    /// The exact stderr bytes; see `stdout_bytes`.
+    #[serde(skip)]
+    pub stderr_bytes: Vec<u8>,
+}
+
+impl CommandResult {
+    /// A result carrying text only: the byte fields are that text's bytes.
+    pub(crate) fn from_text(exit_code: i64, stdout: String, stderr: String, timed_out: bool) -> Self {
+        CommandResult { exit_code, stdout_bytes: stdout.clone().into_bytes(), stderr_bytes: stderr.clone().into_bytes(), stdout, stderr, timed_out, oom_killed: false, ..Default::default() }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -322,13 +349,36 @@ pub struct RunCodeResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitStatus {
     pub branch: String,
+    /// The upstream branch (`origin/main`), when one is configured (also when it is gone).
+    pub upstream: Option<String>,
     pub detached: bool,
     pub ahead: i64,
     pub behind: i64,
+    /// Paths with a staged change (index column not blank); a rename is its NEW path. Not a conflicted path.
     pub staged: Vec<String>,
+    /// Paths with an unstaged change (worktree column not blank). Not a conflicted path.
     pub modified: Vec<String>,
+    /// Untracked files, one per file (never a bare directory).
     pub untracked: Vec<String>,
+    /// Paths in an unmerged state (`DD AU UD UA DU AA UU`), each listed once and only here.
+    pub conflicted: Vec<String>,
+    /// Every record `git status` printed, in order, with its two status columns.
+    pub entries: Vec<GitStatusEntry>,
+    /// True when there are no entries at all.
     pub clean: bool,
+}
+
+/// One `git status --porcelain=v1 -z` record.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitStatusEntry {
+    /// The path, verbatim (not quoted or escaped); for a rename or copy the NEW path.
+    pub path: String,
+    /// The old path of a rename or copy.
+    pub orig_path: Option<String>,
+    /// The index (staged) column: `' '`, `M`, `A`, `D`, `R`, `C`, `U`, or `?` for an untracked file.
+    pub index: char,
+    /// The worktree (unstaged) column, same alphabet.
+    pub worktree: char,
 }
 
 /// One branch entry (`git.branches`).
@@ -337,6 +387,8 @@ pub struct GitBranch {
     pub name: String,
     pub commit: String,
     pub current: bool,
+    /// The upstream branch, when one is set.
+    pub upstream: Option<String>,
 }
 
 /// One commit record (`git.log`).
@@ -346,5 +398,8 @@ pub struct GitCommit {
     pub author: String,
     pub email: String,
     pub date: String,
+    /// The subject line.
     pub message: String,
+    /// The rest of the message, without trailing newlines; empty when there is none.
+    pub body: String,
 }

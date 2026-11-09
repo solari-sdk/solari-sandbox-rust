@@ -1,5 +1,9 @@
 [
   {
+    "op": "commands.runCancellable",
+    "why": "the Rust SDK has no cancel option on a run: a run is cancelled by dropping its future, which stops the guest process only on the live connection; a run on /exec leaves the guest process running"
+  },
+  {
     "op": "desktop.attach",
     "why": "the Rust SDK has no DesktopClient; a desktop is created with Client::create_desktop() and driven through the same Sandbox handle"
   },

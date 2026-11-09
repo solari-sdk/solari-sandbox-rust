@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0
+
+`commands().run` now behaves the same over the one-shot `/exec` route and the live control connection (the shared conformance rows in `tests/conformance/spec/commands.json` pin it; before this release 8 of them failed for this SDK).
+
+### Changed
+- **A deadline that fires below the guest is a result, not an error.** `400 ExecTimeout` and the guest's hidden vsock read timeout (`502 ... i/o timeout`) on `/exec` now return `CommandResult { exit_code: -1, timed_out: true, .. }`, the same result the live connection gives when `timeout_ms` elapses.
+- **A command that cannot start is one error on both routes:** `SolariError::Action { method: "cmd.start", code: Some("ExecFailed"), message }`. `/exec` reports it as a `400 ExecFailed` gateway error, which used to come back as `SolariError::Gateway`; the live connection's refusal carries no code, and `fork/exec ...` / `chdir ...` now get `ExecFailed`.
+- `CommandResult` gained fields, so code that builds one with a struct literal needs `..Default::default()`.
+
+### Fixed
+- **`git().status()`, `branches()` and `log()` no longer lose information** (they ran against real git for the first time in this release's tests). `status` uses `--porcelain=v1 -z --branch --untracked-files=all`: paths are verbatim (not quoted or escaped), a rename is its NEW path with the old one in `entries[].orig_path`, an untracked directory lists its files, a merge conflict is listed once in `conflicted` (not as staged and modified), and `upstream`, `ahead`/`behind` (also `[gone]`) and a detached HEAD are read correctly. New fields: `GitStatus::upstream`, `conflicted`, `entries` (`GitStatusEntry`). `branches` uses `for-each-ref refs/heads`: a detached HEAD is no longer a branch named `(HEAD detached at ...)` and nothing is current then; `GitBranch::upstream` is new. `log` keeps the message body (`GitCommit::body`, `message` is the subject), splits records on `\x1e` so a multi-line body stays with its commit, and a repository with no commit returns an empty list instead of an error. `GitStatus`, `GitBranch` and `GitCommit` gained fields, so code that builds them with a struct literal needs `..Default::default()`.
+
+### Added
+- **`user` is validated before any transport is chosen.** A `user` that is neither `root` nor a unix user name (`^[a-z_][a-z0-9_-]{0,31}$`) fails with `SolariError::Validation` before any request, the same error the gateway's `/exec` route gives, instead of reaching the guest on the live connection. `timeout_ms` is an unsigned integer here, so a negative deadline cannot be written.
+- **A `409 HostCapabilityMissing` from `/exec` is retried once on the live connection.** It means the host pool lacks `exec.user` for the sandbox's default user and nothing ran; the live connection reaches the guest directly, which honours `user`.
+- **`CommandResult::oom_killed`**: true when the guest's memory watchdog killed the command (exit 137 alone is ambiguous). Always present.
+- **`CommandResult::stdout_bytes` / `stderr_bytes`**: the exact output bytes. `stdout` / `stderr` stay UTF-8 text (invalid bytes become U+FFFD); a command that prints binary data is read from the byte fields. They are exact on the live connection. On `/exec` they are exact when the gateway sends its `stdoutBase64` / `stderrBase64` fields (it does, once its guests have them, for output that is not valid UTF-8); until then they are the bytes of the lossy text.
+- **`SolariError::ExecInterrupted`** for `409 ExecInterrupted` (the sandbox was parked while the command ran, so it may have partly run). It is never retried and never re-run on the live connection: exactly one `/exec` request.
+
+### Fixed
+- **`commands().start` output callbacks fire without `wait()`.** They ran only inside `wait()`, so a caller that kept the handle and never awaited it saw no output. A task now drives them as the output arrives; `wait()` collects the result.
+- A flaky test: `read_loops_over_chunks_until_eof` and the upload test used a 2 s call timeout that a loaded machine exceeds with 4 MiB chunks in a debug build (20 failures in 25 runs under CPU load; 0 after), and `commands_run_timeout_kills_the_command` used an 80 ms deadline.
+- Correction to 0.4.0: `SolariError` is `#[non_exhaustive]`, so a new variant is not a breaking change for code outside the crate; only matches written inside this crate are exhaustive.
+
 ## 0.4.0
 
 ### Added
@@ -25,7 +49,7 @@
 ### Fixed
 - **Dropping a `Sandbox` closes its socket.** `ControlChannel` had no `Drop`: the reader task kept the channel state alive, the state kept the writer's sender alive, and the writer task waited on it, so the socket and both tasks ran until the server hung up.
 - **`background: true` delivers output to `on_stdout` / `on_stderr`.** Nothing drove the command's output once `run` returned, so the callbacks were never called.
-- **Dropping a `commands().run` future (or a `tokio::time::timeout` around it) stops the guest process.** It gets SIGTERM and a closed stdin at once and SIGKILL 2 s later; before, it ran on. Dropping a `code().run` future asks the guest to interrupt the kernel (`code.interrupt`; a guest that does not know it is ignored). The one-shot `/exec` path needs nothing: the gateway kills the process when the request goes away.
+- **Dropping a `commands().run` future (or a `tokio::time::timeout` around it) stops the guest process.** It gets SIGTERM and a closed stdin at once and SIGKILL 2 s later; before, it ran on. Dropping a `code().run` future asks the guest to interrupt the kernel (`code.interrupt`; a guest that does not know it is ignored). A command on the one-shot `/exec` route is not stopped by dropping the call (that route has no command id to signal).
 
 ## 0.3.2
 

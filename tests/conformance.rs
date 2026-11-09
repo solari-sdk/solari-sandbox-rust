@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use solari::{Client, ClientOptions, CreateOptions, Lifecycle, SolariError, VolumeAttachment};
+use solari::{Client, ClientOptions, CreateOptions, Lifecycle, RunOptions, SolariError, VolumeAttachment};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
@@ -102,6 +102,11 @@ fn normalize_error(e: &SolariError) -> Value {
         SolariError::NoCapacity { status, code, .. } => ("no_capacity", Some(*status), code.clone()),
         SolariError::SandboxNotStopped { status, code, .. } => ("not_stopped", Some(*status), code.clone()),
         SolariError::Gateway { status, code, .. } => ("gateway", Some(*status), code.clone()),
+        SolariError::ExecInterrupted { status, code, .. } => ("gateway", Some(*status), code.clone()),
+        // The gateway answers a bad value 400 ValidationError; the SDK raises the same class before any request.
+        SolariError::Validation { .. } => ("validation", Some(400), Some("ValidationError".to_string())),
+        SolariError::Action { code, .. } => ("action", None, code.clone()),
+        SolariError::Connection { .. } => ("connection", None, None),
         _ => ("other", None, None),
     };
     let mut out = json!({ "type": ty, "message": e.to_string() });
@@ -110,6 +115,9 @@ fn normalize_error(e: &SolariError) -> Value {
     }
     if let Some(c) = code {
         out["code"] = json!(c);
+    }
+    if matches!(e, SolariError::ExecInterrupted { .. }) {
+        out["retryable"] = json!(false); // by definition: it may have partly run
     }
     out
 }
@@ -147,6 +155,14 @@ fn create_options(i: &Value) -> CreateOptions {
     }
 }
 
+fn command_view(r: &solari::CommandResult) -> Value {
+    {
+        use base64::Engine;
+        json!({ "exitCode": r.exit_code, "stdout": r.stdout, "stderr": r.stderr, "timedOut": r.timed_out, "oomKilled": r.oom_killed,
+                "stdoutBase64": base64::engine::general_purpose::STANDARD.encode(&r.stdout_bytes) })
+    }
+}
+
 fn handle_view(s: &solari::Sandbox) -> Value {
     let mut v = json!({ "sandboxId": s.id(), "kind": s.kind() });
     if let Some(u) = s.stream_url() {
@@ -158,8 +174,8 @@ fn handle_view(s: &solari::Sandbox) -> Value {
     v
 }
 
-const SUPPORTED: [&str; 8] =
-    ["sandbox.create", "sandbox.createDesktop", "sandbox.get", "sandbox.pause", "sandbox.resume", "sandbox.start", "sandbox.kill", "sandbox.connect"];
+const SUPPORTED: [&str; 12] =
+    ["git.status", "git.branches", "git.log", "commands.run", "sandbox.create", "sandbox.createDesktop", "sandbox.get", "sandbox.pause", "sandbox.resume", "sandbox.start", "sandbox.kill", "sandbox.connect"];
 
 /// Run one op against `base_url`. Returns `{result}` or `{error}`; never panics on an SDK error. A handle op first creates a
 /// sandbox (the row's mock lists that exchange).
@@ -177,6 +193,59 @@ async fn run_op(op: &str, input: &Value, base_url: &str) -> Value {
                     r["controlUrl"] = json!(u);
                 }
                 Ok(r)
+            }
+            "git.status" | "git.branches" | "git.log" => {
+                let s = c.create(CreateOptions { template: Some("base".into()), ..Default::default() }).await?;
+                let cwd = input.get("cwd").and_then(Value::as_str).map(String::from);
+                let g = s.git();
+                match op {
+                    "git.status" => {
+                        let st = g.status(cwd.as_deref()).await?;
+                        Ok(json!({
+                            "branch": st.branch, "upstream": st.upstream, "detached": st.detached, "ahead": st.ahead, "behind": st.behind,
+                            "staged": st.staged, "modified": st.modified, "untracked": st.untracked, "conflicted": st.conflicted, "clean": st.clean,
+                            "entries": st.entries.iter().map(|e| {
+                                let mut v = json!({ "path": e.path, "index": e.index.to_string(), "worktree": e.worktree.to_string() });
+                                if let Some(o) = &e.orig_path { v["origPath"] = json!(o); }
+                                v
+                            }).collect::<Vec<_>>(),
+                        }))
+                    }
+                    "git.branches" => {
+                        let bs = g.branches(cwd.as_deref()).await?;
+                        Ok(json!({ "list": bs.iter().map(|b| {
+                            let mut v = json!({ "name": b.name, "commit": b.commit, "current": b.current });
+                            if let Some(u) = &b.upstream { v["upstream"] = json!(u); }
+                            v
+                        }).collect::<Vec<_>>() }))
+                    }
+                    _ => {
+                        let log = g.log(solari::GitLogOptions { cwd, max_count: input.get("maxCount").and_then(Value::as_i64).map(|n| n as _) }).await?;
+                        Ok(json!({ "list": log.iter().map(|c| json!({ "hash": c.hash, "author": c.author, "email": c.email, "date": c.date, "message": c.message, "body": c.body })).collect::<Vec<_>>() }))
+                    }
+                }
+            }
+            "commands.run" => {
+                let s = c.create(CreateOptions { template: Some("base".into()), ..Default::default() }).await?;
+                let mut o = RunOptions::new();
+                if let Some(a) = input.get("args").and_then(Value::as_array) {
+                    o = o.args(a.iter().map(|x| x.as_str().unwrap().to_string()));
+                }
+                match input.get("timeoutMs").and_then(Value::as_i64) {
+                    Some(t) if t >= 0 => o.timeout_ms = Some(t as u64),
+                    // timeout_ms is an unsigned integer: a negative value cannot be written, so there is nothing to reject.
+                    Some(_) => return Err(SolariError::Other("negative timeoutMs cannot be expressed".into())),
+                    None => {}
+                }
+                if let Some(u) = input.get("user").and_then(Value::as_str) {
+                    o.user = Some(u.to_string());
+                }
+                // via "ws": a non-empty env forces the live control connection; via "rest": nothing does (no channel, no env).
+                if input.get("via").and_then(Value::as_str) == Some("ws") {
+                    o.env = Some(std::collections::HashMap::from([("SOLARI_CONFORMANCE".to_string(), "1".to_string())]));
+                }
+                let r = s.commands().run(input["cmd"].as_str().unwrap(), o).await?;
+                Ok(command_view(&r))
             }
             _ => {
                 let mut s = c.create(CreateOptions { template: Some("base".into()), ..Default::default() }).await?;
@@ -202,7 +271,8 @@ async fn run_op(op: &str, input: &Value, base_url: &str) -> Value {
 async fn check_row(mock: &Mock, row: &Value) -> Option<String> {
     mock.post("/__reset", json!({})).await;
     let script = row.get("mock").cloned().unwrap_or(json!([])).to_string().replace("$MOCK_WS", &mock.url.replacen("http", "ws", 1)).replace("$MOCK_URL", &mock.url);
-    let armed = mock.post("/__arm", json!({ "mock": serde_json::from_str::<Value>(&script).unwrap() })).await;
+    let strict = row.get("expect").and_then(|e| e.get("wsCalls")).is_some();
+    let armed = mock.post("/__arm", json!({ "mock": serde_json::from_str::<Value>(&script).unwrap(), "ws": row.get("ws").cloned().unwrap_or(json!([])), "strict": strict })).await;
     if armed["ok"] != json!(true) {
         return Some(format!("could not arm the mock: {armed}"));
     }
@@ -236,6 +306,12 @@ async fn check_row(mock: &Mock, row: &Value) -> Option<String> {
     if let Some(n) = exp.get("requests").and_then(Value::as_u64) {
         if requests as u64 != n {
             return Some(format!("expected {n} request(s), made {requests}"));
+        }
+    }
+    if let Some(n) = exp.get("wsCalls").and_then(Value::as_u64) {
+        let made = log["wsCalls"].as_array().map(|a| a.len()).unwrap_or(0) as u64;
+        if made != n {
+            return Some(format!("expected {n} control call(s), made {made}"));
         }
     }
     let remaining = log["remaining"].as_u64().unwrap();

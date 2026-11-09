@@ -1,0 +1,147 @@
+{
+ "comment": "Rows of this repo only (not part of the vendored suite): exact binary output on both routes. They move into the shared suite when the gateway field and the other SDKs have it.",
+ "binary": [
+  {
+   "id": "run-binary-rest",
+   "op": "commands.run",
+   "why": "binary output is exact on /exec: the gateway sends the bytes as stdoutBase64 beside the lossy text; a client prefers it",
+   "input": {
+    "via": "rest",
+    "cmd": "printf",
+    "args": [
+     "x"
+    ],
+    "timeoutMs": 5000
+   },
+   "mock": [
+    {
+     "expect": {
+      "method": "POST",
+      "path": "/sandboxes",
+      "body": {
+       "template": "base"
+      }
+     },
+     "reply": {
+      "status": 201,
+      "body": {
+       "sandboxId": "pool-a:vm-7:org-42.sig",
+       "kind": "sandbox",
+       "state": "running",
+       "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+       "expiresAt": "2030-01-01T00:00:00Z"
+      }
+     }
+    },
+    {
+     "expect": {
+      "method": "POST",
+      "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+      "headers": {
+       "authorization": "Bearer conformance-test-key",
+       "accept": "application/json",
+       "content-type": "application/json"
+      },
+      "body": {
+       "cmd": "printf",
+       "args": [
+        "x"
+       ],
+       "timeoutMs": 5000
+      }
+     },
+     "reply": {
+      "status": 200,
+      "body": {
+       "exitCode": 0,
+       "stdout": "a\u0000\ufffd\n",
+       "stderr": "",
+       "timedOut": false,
+       "stdoutBase64": "YQD/Cg=="
+      }
+     }
+    }
+   ],
+   "expect": {
+    "result": {
+     "exitCode": 0,
+     "stdoutBase64": "YQD/Cg==",
+     "timedOut": false
+    }
+   }
+  },
+  {
+   "id": "run-binary-ws",
+   "op": "commands.run",
+   "why": "binary output is exact on the live connection too (cmd.data is base64): the same bytes as run-binary-rest",
+   "input": {
+    "via": "ws",
+    "cmd": "printf",
+    "args": [
+     "x"
+    ],
+    "timeoutMs": 5000
+   },
+   "mock": [
+    {
+     "expect": {
+      "method": "POST",
+      "path": "/sandboxes",
+      "body": {
+       "template": "base"
+      }
+     },
+     "reply": {
+      "status": 201,
+      "body": {
+       "sandboxId": "pool-a:vm-7:org-42.sig",
+       "kind": "sandbox",
+       "state": "running",
+       "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+       "expiresAt": "2030-01-01T00:00:00Z"
+      }
+     }
+    }
+   ],
+   "ws": [
+    {
+     "expect": {
+      "method": "cmd.start",
+      "params": {
+       "cmd": "printf",
+       "args": [
+        "x"
+       ]
+      }
+     },
+     "reply": {
+      "ok": true,
+      "result": {
+       "cmdId": "c1"
+      }
+     },
+     "then": [
+      {
+       "type": "cmd.data",
+       "cmdId": "c1",
+       "stream": "stdout",
+       "base64": "YQD/Cg=="
+      },
+      {
+       "type": "cmd.exit",
+       "cmdId": "c1",
+       "exitCode": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "result": {
+     "exitCode": 0,
+     "stdoutBase64": "YQD/Cg==",
+     "timedOut": false
+    }
+   }
+  }
+ ]
+}
