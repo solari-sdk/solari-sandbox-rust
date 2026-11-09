@@ -121,6 +121,97 @@
       }
     },
     {
+      "id": "status-copy-record",
+      "op": "git.status",
+      "input": {
+        "cwd": "/repo"
+      },
+      "why": "with status.renames=copies git reports a COPY as 'C  new' followed by the source path as its own record (like a rename); the source must be taken as origPath and NOT parsed as an entry of its own",
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/exec",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "content-type": "application/json"
+            },
+            "body": {
+              "cmd": "git",
+              "args": [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--branch",
+                "--untracked-files=all"
+              ],
+              "cwd": "/repo"
+            }
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "exitCode": 0,
+              "stdout": "## main\u0000C  copy\u0000orig\u0000M  orig\u0000",
+              "stderr": "",
+              "timedOut": false,
+              "oomKilled": false
+            }
+          }
+        }
+      ],
+      "expect": {
+        "result": {
+          "branch": "main",
+          "ahead": 0,
+          "behind": 0,
+          "detached": false,
+          "staged": [
+            "copy",
+            "orig"
+          ],
+          "modified": [],
+          "conflicted": [],
+          "untracked": [],
+          "clean": false,
+          "entries": [
+            {
+              "path": "copy",
+              "origPath": "orig",
+              "index": "C",
+              "worktree": " "
+            },
+            {
+              "path": "orig",
+              "index": "M",
+              "worktree": " "
+            }
+          ]
+        },
+        "requests": 2
+      }
+    },
+    {
       "id": "status-detached-head",
       "op": "git.status",
       "input": {
