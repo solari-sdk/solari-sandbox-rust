@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+- **Dropping a `commands().run` future and then closing the sandbox could leave the guest process running.** The cancel (SIGTERM and a closed stdin) was sent from a task spawned by the drop; a caller that closed the sandbox straight after the drop closed the channel before that task ran, so no cancel was ever sent (reproduced: the guest saw only `cmd.start`). The two frames are now queued on the socket before the drop returns (`ControlChannel::send_now`), and `close()` still flushes what is queued. The SIGKILL that follows the 2 s grace needs the channel to still be open then, so it stays best effort: a process that ignores SIGTERM and whose sandbox handle was closed in that window keeps running until the sandbox expires.
+
+### Tests
+- Added for the retest: drop then `close()` at once still delivers SIGTERM and the closed stdin; exact stdout and stderr bytes over the live connection (kept apart) and on `/exec` (base64 per stream, the text as the fallback, a bad base64 falls back per stream); every refusal before git runs (option-like ref, remote and branch) is `SolariError::Git` and runs nothing.
+
+### Upgrading from 0.4 (behaviour changes since 0.5.0 that can break callers)
+- `CommandResult` gained fields (`oom_killed`, `stdout_bytes`, `stderr_bytes`), so code that builds one with a struct literal needs `..Default::default()`.
+- A deadline that fires below the guest is now a RESULT (`exit_code: -1`, `timed_out: true`), not an error; code that matched `SolariError::Gateway { code: Some("ExecTimeout") }` or the `502 ... i/o timeout` no longer sees it.
+- A command that cannot start is `SolariError::Action { method: "cmd.start", code: Some("ExecFailed") }` on both routes; `/exec` used to return `SolariError::Gateway` for it.
+- A `user` that is not `root` or a unix user name fails with `SolariError::Validation` before any request.
+- `status()`, `branches()` and `log()` parse differently (verbatim paths, only real branches, an empty list for a repository with no commit).
+
 ## 0.5.0
 
 `commands().run` now behaves the same over the one-shot `/exec` route and the live control connection (the shared conformance rows in `tests/conformance/spec/commands.json` pin it; before this release 8 of them failed for this SDK).

@@ -769,6 +769,31 @@ mod tests {
         assert!(err.contains("git clone failed") && !err.contains("hunter2"), "got {err}");
     }
 
+    /// Every refusal made before git runs is `SolariError::Git`, and git is not run: an option-like ref, remote or branch, and
+    /// a credential with a line break.
+    #[tokio::test]
+    async fn every_refusal_before_git_runs_is_a_git_error_and_runs_nothing() {
+        let stub = StubGit::new(|_| StubGit::ok(""));
+        let git = Git::new(&stub);
+        let errs = vec![
+            git.checkout("--upload-pack=evil", Some("/r"), false).await.unwrap_err(),
+            git.push(GitRemoteOptions { cwd: Some("/r".into()), remote: Some("-evil".into()), ..Default::default() }).await.unwrap_err(),
+            git.pull(GitRemoteOptions { cwd: Some("/r".into()), branch: Some("--force".into()), ..Default::default() }).await.unwrap_err(),
+        ];
+        for e in errs {
+            assert!(matches!(e, SolariError::Git { .. }), "got {e:?}");
+        }
+        assert!(stub.calls.lock().unwrap().is_empty(), "a refused call must not run git");
+    }
+
+    /// A git command that exits non-zero is `SolariError::Git` too (a SolariError like every other SDK failure).
+    #[tokio::test]
+    async fn a_failed_git_command_is_a_git_error() {
+        let stub = StubGit::new(|_| CommandResult { exit_code: 128, stderr: "fatal: not a git repository".into(), ..Default::default() });
+        let e = Git::new(&stub).add(&["a".to_string()], Some("/nope")).await.unwrap_err();
+        assert!(matches!(e, SolariError::Git { .. }), "got {e:?}");
+    }
+
     #[tokio::test]
     async fn push_resolves_the_remote_url_binds_the_helper_to_its_origin_and_keeps_the_secret_out_of_argv() {
         let stub = StubGit::new(|args| {

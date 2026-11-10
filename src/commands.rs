@@ -106,10 +106,14 @@ struct CancelGuard {
 impl Drop for CancelGuard {
     fn drop(&mut self) {
         let Some(io) = self.io.take() else { return };
+        // SIGTERM and the closed stdin are queued on the socket HERE, before this returns, not from a spawned task: a caller
+        // that drops the run and then closes the sandbox at once used to close the channel before the task ran, and the
+        // process kept running. A frame already queued is flushed by close().
+        io.channel.send_now("cmd.kill", serde_json::json!({ "cmdId": io.cmd_id, "signal": 15 }));
+        io.channel.send_now("cmd.stdin", serde_json::json!({ "cmdId": io.cmd_id, "base64": "", "eof": true }));
+        // The SIGKILL after the grace period needs the channel to still be open then, so it is best effort.
         let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
         rt.spawn(async move {
-            let _ = io.kill(Some(15)).await;
-            let _ = io.close_stdin().await;
             tokio::time::sleep(CANCEL_KILL_GRACE).await;
             let _ = io.kill(Some(9)).await;
         });
@@ -597,5 +601,37 @@ impl<'a> Commands<'a> {
     /// Start a command and return a handle immediately.
     pub async fn start(&self, cmd: &str, opts: RunOptions) -> Result<CommandHandle, SolariError> {
         start_command(self.sb, cmd, &opts).await
+    }
+}
+
+#[cfg(test)]
+mod exec_bytes_tests {
+    use super::exec_outcome;
+    use crate::types::CommandResult;
+
+    fn answer(json: &str) -> CommandResult {
+        exec_outcome(Ok(serde_json::from_str(json).unwrap())).unwrap()
+    }
+
+    /// Retest 2026-11-10 (native report): the `/exec` answer's exact bytes, stdout AND stderr.
+    #[test]
+    fn the_gateways_base64_gives_the_exact_bytes_of_each_stream() {
+        let r = answer(r#"{"exitCode":1,"stdout":"\ufffd\ufffd","stderr":"\ufffd","stdoutBase64":"/wD+","stderrBase64":"/w=="}"#);
+        assert_eq!(r.stdout_bytes, vec![0xff, 0x00, 0xfe]);
+        assert_eq!(r.stderr_bytes, vec![0xff]);
+    }
+
+    #[test]
+    fn without_base64_each_stream_is_the_bytes_of_its_text() {
+        let r = answer(r#"{"exitCode":1,"stdout":"héllo","stderr":"oops é"}"#);
+        assert_eq!(r.stdout_bytes, "héllo".as_bytes());
+        assert_eq!(r.stderr_bytes, "oops é".as_bytes());
+    }
+
+    #[test]
+    fn a_bad_base64_falls_back_to_the_text_per_stream() {
+        let r = answer(r#"{"exitCode":1,"stdout":"ok","stderr":"bad","stdoutBase64":"!!","stderrBase64":"!!"}"#);
+        assert_eq!(r.stdout_bytes, b"ok");
+        assert_eq!(r.stderr_bytes, b"bad");
     }
 }

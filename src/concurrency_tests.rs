@@ -215,6 +215,28 @@ async fn stdout_bytes_keep_binary_output_exactly() {
     assert_eq!(r.stderr_bytes, Vec::<u8>::new());
 }
 
+/// stderr gets the same exact bytes over the live connection, kept apart from stdout.
+#[tokio::test]
+async fn stderr_bytes_keep_binary_output_exactly_and_apart_from_stdout() {
+    let err: Vec<u8> = vec![0xfe, 0x00, 0xff, b'w'];
+    let err2 = err.clone();
+    let gw = gateway(Arc::new(move |method, _| match method {
+        "cmd.start" => vec![
+            reply(json!({"cmdId": "c1"})),
+            json!({"type": "cmd.data", "cmdId": "c1", "stream": "stdout", "base64": b64(b"out")}),
+            json!({"type": "cmd.data", "cmdId": "c1", "stream": "stderr", "base64": b64(&err2)}),
+            json!({"type": "cmd.exit", "cmdId": "c1", "exitCode": 2}),
+        ],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let sbx = sandbox(&gw);
+    sbx.connect().await.unwrap();
+    let r = sbx.commands().run("x", RunOptions::new()).await.unwrap();
+    assert_eq!(r.stderr_bytes, err);
+    assert_eq!(r.stdout_bytes, b"out");
+}
+
 /// `wait(self)` consumes the handle, so a command could not be written to while it was being waited on.
 #[tokio::test]
 async fn stdin_can_be_written_while_another_task_waits() {
@@ -367,6 +389,35 @@ async fn a_dropped_run_stops_the_guest_process() {
         ("cmd.kill", Some(9)),
         "no SIGKILL after the grace: {:?}",
         methods(&gw.calls)
+    );
+}
+
+/// Retest 2026-11-10: dropping a run and closing the sandbox at once left the process running, because the cancel was sent
+/// from a spawned task that ran after the channel had closed. The SIGTERM and the closed stdin are queued before the drop
+/// returns, and `close()` still flushes them.
+#[tokio::test]
+async fn a_dropped_run_followed_at_once_by_close_still_stops_the_process() {
+    let gw = gateway(Arc::new(|method, _| match method {
+        "cmd.start" => vec![reply(json!({"cmdId": "c1"}))],
+        _ => vec![reply(json!({"ok": true}))],
+    }))
+    .await;
+    let sbx = sandbox(&gw);
+    sbx.connect().await.unwrap();
+    let commands = sbx.commands();
+    let run = commands.run("sleep", RunOptions::new().args(["60"]));
+    assert!(tokio::time::timeout(Duration::from_millis(150), run).await.is_err(), "the run should still be going");
+    sbx.close(); // straight after the drop, before any spawned task could run
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let calls = gw.calls.lock().unwrap().clone();
+    let names: Vec<_> = calls.iter().map(|c| c.0.clone()).collect();
+    assert!(
+        calls.iter().any(|c| c.0 == "cmd.kill" && c.1["signal"].as_i64() == Some(15)),
+        "no SIGTERM reached the guest after drop + close: {names:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c.0 == "cmd.stdin" && c.1["eof"] == true),
+        "stdin was not closed after drop + close: {names:?}"
     );
 }
 
