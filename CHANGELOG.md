@@ -1,9 +1,13 @@
 # Changelog
 
-## 0.5.1
+## 0.5.2
 
 ### Fixed
 - **`pause` retries `503 PauseRetryable`.** A host that cuts a pause short leaves the sandbox running and the gateway answers a retryable 503, but `POST /pause` carried no `Idempotency-Key`, so the transport never retried and the caller saw the 503. Pause is idempotent on the gateway (an already-paused sandbox answers 200), so every call now sends one key, the same on every attempt, and the 503 is retried with backoff.
+
+## 0.5.1
+
+### Fixed
 - **Dropping a `commands().run` future and then closing the sandbox could leave the guest process running.** The cancel (SIGTERM and a closed stdin) was sent from a task spawned by the drop; a caller that closed the sandbox straight after the drop closed the channel before that task ran, so no cancel was ever sent (reproduced: the guest saw only `cmd.start`). The two frames are now queued on the socket before the drop returns (`ControlChannel::send_now`), and `close()` still flushes what is queued. The SIGKILL that follows the 2 s grace needs the channel to still be open then, so it stays best effort: a process that ignores SIGTERM and whose sandbox handle was closed in that window keeps running until the sandbox expires.
 
 ### Tests
