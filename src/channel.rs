@@ -195,6 +195,8 @@ pub struct ControlChannel {
     headers: Vec<(String, String)>,
     state: Arc<ChannelState>,
     connecting: tokio::sync::Mutex<()>,
+    /// Completes when the writer task has sent everything queued and closed the socket (see [`ControlChannel::close_flushed`]).
+    writer_done: Mutex<Option<oneshot::Receiver<()>>>,
     // Cheap `connected` probe without locking `inner`.
     ws_open: Arc<AtomicBool>,
 }
@@ -218,6 +220,7 @@ impl ControlChannel {
                 call_timeout,
             }),
             connecting: tokio::sync::Mutex::new(()),
+            writer_done: Mutex::new(None),
             ws_open: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -303,6 +306,8 @@ impl ControlChannel {
         let (wtx, mut wrx) = mpsc::unbounded_channel::<Message>();
 
         // Writer task: drains the outbound queue to the socket.
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        *self.writer_done.lock().unwrap() = Some(done_rx);
         tokio::spawn(async move {
             while let Some(msg) = wrx.recv().await {
                 if sink.send(msg).await.is_err() {
@@ -310,6 +315,7 @@ impl ControlChannel {
                 }
             }
             let _ = sink.close().await;
+            let _ = done_tx.send(());
         });
 
         // Reader task: feeds inbound text/binary into the frame dispatcher.
@@ -356,6 +362,18 @@ impl ControlChannel {
             inner.closed = true;
         }
         self.state.fail_all("Control channel closed");
+    }
+
+    /// [`close`](Self::close), then wait (up to `max_wait`) until everything already queued on the socket (for example the
+    /// `cmd.kill` of a dropped `run()`) has been sent. `close()` returns at once and a background task sends the queue; a
+    /// program that ends right after `close()` (a runtime that is dropped, `main` returning) cuts that task off and the
+    /// frames are lost, so the guest process keeps running. Await this before exiting.
+    pub async fn close_flushed(&self, max_wait: Duration) {
+        self.close();
+        let rx = self.writer_done.lock().unwrap().take();
+        if let Some(rx) = rx {
+            let _ = tokio::time::timeout(max_wait, rx).await;
+        }
     }
 
     /// Queue one JSON-RPC call on the socket RIGHT NOW and do not wait for the reply (which is dropped when it arrives: no one

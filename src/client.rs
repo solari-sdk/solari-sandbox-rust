@@ -402,6 +402,13 @@ impl Sandbox {
         self.channel.close();
     }
 
+    /// [`close`](Self::close), then wait (at most 2 s) until the frames already queued on the control socket have been sent.
+    /// Use it as the last call of a program that dropped a `run()` (whose cancel is queued by the drop): plain `close()`
+    /// returns at once and a program that ends right after it can lose the cancel, leaving the guest process running.
+    pub async fn close_flushed(&self) {
+        self.channel.close_flushed(std::time::Duration::from_secs(2)).await;
+    }
+
     /// Pause this session: snapshot its RAM+disk, free its host slot, and close
     /// the control channel. The session keeps its id; bring it back with
     /// [`Sandbox::resume`].

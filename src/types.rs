@@ -37,6 +37,20 @@ pub struct Lifecycle {
     pub checkpoint_every_ms: Option<u64>,
 }
 
+/// `Lifecycle::default()` is the gateway's own default: pause on timeout, every other knob unset.
+impl Default for Lifecycle {
+    fn default() -> Self {
+        Lifecycle {
+            on_timeout: "pause".to_string(),
+            auto_resume: None,
+            park_after_ms: None,
+            park_max_ms: None,
+            hibernate_after_parked_ms: None,
+            checkpoint_every_ms: None,
+        }
+    }
+}
+
 /// One attach-at-create instruction: a persistent volume and the absolute
 /// in-guest path to mount it at. The mount happens host-side before the guest
 /// starts, and survives pause/resume and recreate.
