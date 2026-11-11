@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3
+
+### Added
+- **`Sandbox::close_flushed()` (and `ControlChannel::close_flushed`).** `close()` returns at once and a background task sends whatever is still queued on the control socket, for example the SIGTERM and closed stdin that dropping a `run()` queues. A program that ends right after `close()` (a runtime that is dropped, `main` returning) cuts that task off, the cancel never reaches the guest and the process keeps running. Await `close_flushed()` as the last call to be sure the queue is sent (it waits at most 2 s). Retest C-05.
+- **`Lifecycle` implements `Default`** (`on_timeout: "pause"`, everything else unset), so `Lifecycle { park_after_ms: Some(1000), ..Default::default() }` compiles. Retest C-33.
+
+### Tests
+- `tests/drop_close.rs`: a `cmd.kill` queued before the close reaches a mock gateway when the program awaits `close_flushed()` (it did not with plain `close()`); `Lifecycle::default()` serialises as pause.
+
 ## 0.5.2
 
 ### Fixed
