@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.3
+
+### Fixed
+- **The control socket closes itself after 3 s with nothing using it, and the next call reopens it.** An open control socket counts as activity at the gateway (it pushes the idle deadline out every 60 s), so a program that connected and then went quiet kept its sandbox from pausing or expiring for about 5 minutes. The socket is now closed after `ClientOptions::idle_close_ms` (default 3000; `Some(0)` disables it; `ControlChannel::set_idle_close_ms`) with no call in flight, no running command and no open PTY or watch, as in the TypeScript and Python SDKs. `connected()` is false while it is closed; any call reopens it by itself, and a socket that ended this way is not reported as a drop. Retest C-17.
+
+### Added
+- **`Sandbox::close_flushed()` (and `ControlChannel::close_flushed`).** `close()` returns at once and a background task sends whatever is still queued on the control socket, for example the SIGTERM and closed stdin that dropping a `run()` queues. A program that ends right after `close()` (a runtime that is dropped, `main` returning) cuts that task off, the cancel never reaches the guest and the process keeps running. Await `close_flushed()` as the last call to be sure the queue is sent (it waits at most 2 s). Retest C-05.
+- **`Lifecycle` implements `Default`** (`on_timeout: "pause"`, everything else unset), so `Lifecycle { park_after_ms: Some(1000), ..Default::default() }` compiles. Retest C-33.
+
+### Tests
+- `tests/idle_close.rs`: an idle socket closes and a later call reopens it; a running command keeps it open and it closes after the command ends; a command that exited before its handler existed does not keep it open. `tests/drop_close.rs`: a `cmd.kill` queued before the close reaches a mock gateway when the program awaits `close_flushed()` (it did not with plain `close()`); `Lifecycle::default()` serialises as pause.
+
 ## 0.5.2
 
 ### Fixed
