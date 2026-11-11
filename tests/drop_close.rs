@@ -64,4 +64,6 @@ fn queued_kill_reaches_the_gateway_when_the_program_awaits_close_flushed() {
 fn lifecycle_has_a_default_that_pauses() {
     let l = solari::Lifecycle { park_after_ms: Some(1000), ..Default::default() };
     assert_eq!(serde_json::to_value(&l).unwrap(), serde_json::json!({ "onTimeout": "pause", "parkAfterMs": 1000 }));
+    // alone: every other knob is unset and so absent from the wire
+    assert_eq!(serde_json::to_value(solari::Lifecycle::default()).unwrap(), serde_json::json!({ "onTimeout": "pause" }));
 }
