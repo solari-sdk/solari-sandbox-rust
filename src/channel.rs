@@ -60,12 +60,24 @@ struct Inner {
     writer: Option<mpsc::UnboundedSender<Message>>,
     ws_open: bool,
     closed: bool,
+    /// Which socket is current; bumped on every connect and every idle close, so a socket's reader task can tell its socket has
+    /// been replaced or idle-closed (and must not fail the channel for it).
+    conn_id: u64,
+    /// The socket was closed for being idle, not by `close()` or a drop: the next call reopens it.
+    idle_closed: bool,
+    /// Bumped whenever the idle timer is re-armed or cancelled; a timer whose generation is stale does nothing.
+    idle_gen: u64,
 }
 
 struct ChannelState {
     inner: Mutex<Inner>,
     call_timeout: Duration,
+    /// Idle close window in ms; 0 disables it.
+    idle_close_ms: std::sync::atomic::AtomicU64,
 }
+
+/// Default for [`ControlChannel::set_idle_close_ms`], as in the TS and Python SDKs.
+const DEFAULT_IDLE_CLOSE_MS: u64 = 3000;
 
 impl ChannelState {
     /// Feed a raw text chunk from the socket: accumulate, split on `\n`, trim,
@@ -218,6 +230,7 @@ impl ControlChannel {
                     ..Default::default()
                 }),
                 call_timeout,
+                idle_close_ms: std::sync::atomic::AtomicU64::new(DEFAULT_IDLE_CLOSE_MS),
             }),
             connecting: tokio::sync::Mutex::new(()),
             writer_done: Mutex::new(None),
@@ -321,6 +334,11 @@ impl ControlChannel {
         // Reader task: feeds inbound text/binary into the frame dispatcher.
         let state = self.state.clone();
         let ws_open = self.ws_open.clone();
+        let cid = {
+            let mut inner = self.state.inner.lock().unwrap();
+            inner.conn_id += 1;
+            inner.conn_id
+        };
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
@@ -331,6 +349,10 @@ impl ControlChannel {
                     Err(_) => break,
                 }
             }
+            // A socket that was idle-closed or replaced is no longer the channel's: its end is not a drop.
+            if state.inner.lock().unwrap().conn_id != cid {
+                return;
+            }
             ws_open.store(false, Ordering::SeqCst);
             state.fail_all("Control channel closed");
         });
@@ -340,8 +362,10 @@ impl ControlChannel {
             inner.writer = Some(wtx);
             inner.ws_open = true;
             inner.closed = false;
+            inner.idle_closed = false;
         }
         self.ws_open.store(true, Ordering::SeqCst);
+        self.arm_idle_close();
         Ok(())
     }
 
@@ -360,6 +384,8 @@ impl ControlChannel {
         {
             let mut inner = self.state.inner.lock().unwrap();
             inner.closed = true;
+            inner.idle_closed = false;
+            inner.idle_gen += 1;
         }
         self.state.fail_all("Control channel closed");
     }
@@ -398,8 +424,64 @@ impl ControlChannel {
         writer.send(Message::Text(format!("{frame}\n").into())).is_ok()
     }
 
-    /// Send one JSON-RPC call and await its correlated reply.
+    /// Close the socket after `ms` with nothing using it (no call in flight, no running command, no open PTY or watch); the
+    /// next call reopens it by itself. An open control socket counts as activity at the gateway (it pushes the idle deadline
+    /// out every 60 s), so a socket left open keeps an idle sandbox from pausing or expiring on time. Default 3000; 0 disables.
+    pub fn set_idle_close_ms(&self, ms: u64) {
+        self.state.idle_close_ms.store(ms, Ordering::SeqCst);
+        self.arm_idle_close();
+    }
+
+    fn in_use(inner: &Inner) -> bool {
+        !inner.pending.is_empty() || !inner.frame_handlers.is_empty()
+    }
+
+    /// (Re)start the idle timer when the channel is open and unused. Called whenever the channel may have become idle: after
+    /// connect, after a call returns, after a command's handlers are unregistered.
+    fn arm_idle_close(&self) {
+        let ms = self.state.idle_close_ms.load(Ordering::SeqCst);
+        let gen = {
+            let mut inner = self.state.inner.lock().unwrap();
+            inner.idle_gen += 1;
+            if ms == 0 || inner.closed || !inner.ws_open || Self::in_use(&inner) {
+                return;
+            }
+            inner.idle_gen
+        };
+        let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+        let state = self.state.clone();
+        let ws_open = self.ws_open.clone();
+        rt.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            let mut inner = state.inner.lock().unwrap();
+            if inner.idle_gen != gen || inner.closed || !inner.ws_open || ControlChannel::in_use(&inner) {
+                return;
+            }
+            // Take the socket out of the channel BEFORE it closes (dropping the sender makes the writer task close it): its
+            // reader then sees the socket is no longer current and does not read the close as a drop.
+            inner.conn_id += 1;
+            inner.ws_open = false;
+            inner.idle_closed = true;
+            inner.writer = None;
+            ws_open.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Send one JSON-RPC call and await its correlated reply. A socket that was closed for being idle is reopened first.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, SolariError> {
+        let reopen = {
+            let inner = self.state.inner.lock().unwrap();
+            inner.idle_closed && !inner.closed && !inner.ws_open
+        };
+        if reopen {
+            self.connect().await?;
+        }
+        let r = self.call_inner(method, params).await;
+        self.arm_idle_close();
+        r
+    }
+
+    async fn call_inner(&self, method: &str, params: Value) -> Result<Value, SolariError> {
         let (id, rx, writer) = {
             let mut inner = self.state.inner.lock().unwrap();
             if inner.closed {
@@ -489,6 +571,8 @@ impl ControlChannel {
         for typ in ["cmd.data", "cmd.exit"] {
             inner.frame_handlers.remove(&(typ.to_string(), cmd_id.to_string()));
         }
+        drop(inner);
+        self.arm_idle_close();
     }
 
     // --- test-only seams -----------------------------------------------------

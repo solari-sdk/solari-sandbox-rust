@@ -30,6 +30,10 @@ pub struct ClientOptions {
     pub base_url: String,
     /// Per-call control-WS RPC timeout override (ms). Defaults to 300000.
     pub call_timeout_ms: Option<u64>,
+    /// Close the control socket after this many ms with nothing using it (no call in flight, no running command, no open PTY or
+    /// watch); the next call reopens it by itself. An open socket counts as activity at the gateway, so one left open keeps an
+    /// idle sandbox from pausing or expiring on time. `None` means 3000; `Some(0)` disables it.
+    pub idle_close_ms: Option<u64>,
 }
 
 impl ClientOptions {
@@ -43,6 +47,7 @@ impl ClientOptions {
             api_key: api_key.into(),
             base_url: base_url.into(),
             call_timeout_ms: None,
+            idle_close_ms: None,
         }
     }
 }
@@ -112,6 +117,7 @@ impl From<CreateOptions> for CreateSandboxRequest {
 pub struct Client {
     http: Arc<HttpTransport>,
     call_timeout_ms: Option<u64>,
+    idle_close_ms: Option<u64>,
 }
 
 impl Client {
@@ -121,6 +127,7 @@ impl Client {
         Ok(Client {
             http: Arc::new(http),
             call_timeout_ms: opts.call_timeout_ms,
+            idle_close_ms: opts.idle_close_ms,
         })
     }
 
@@ -153,7 +160,11 @@ impl Client {
             .http
             .request("POST", "/sandboxes", Some(body), Some(new_idempotency_key()))
             .await?;
-        Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)
+        let sb = Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)?;
+        if let Some(ms) = self.idle_close_ms {
+            sb.channel.set_idle_close_ms(ms);
+        }
+        Ok(sb)
     }
 
     /// Re-attach to a running sandbox by id (`GET /sandboxes/:id`).
@@ -194,7 +205,11 @@ impl Client {
             stream_url,
             recording_url: None,
         };
-        Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)
+        let sb = Sandbox::from_response(self.http.clone(), resp, self.call_timeout_ms)?;
+        if let Some(ms) = self.idle_close_ms {
+            sb.channel.set_idle_close_ms(ms);
+        }
+        Ok(sb)
     }
 
     /// Fetch a sandbox's current view (`GET /sandboxes/:id`).
