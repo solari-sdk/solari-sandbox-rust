@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+- **`pause` retries `503 PauseRetryable`.** A host that cuts a pause short leaves the sandbox running and the gateway answers a retryable 503, but `POST /pause` carried no `Idempotency-Key`, so the transport never retried and the caller saw the 503. Pause is idempotent on the gateway (an already-paused sandbox answers 200), so every call now sends one key, the same on every attempt, and the 503 is retried with backoff.
+
 ## 0.5.1
 
 ### Fixed

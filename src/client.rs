@@ -233,7 +233,9 @@ impl Client {
                 "POST",
                 &format!("/sandboxes/{}/pause", encode_uri_component(sandbox_id)),
                 None,
-                None,
+                // Pause is idempotent on the gateway (an already-paused sandbox answers 200). The key is what makes the transport
+                // retry a POST at all, so a retryable 503 PauseRetryable (the host cut the pause short) is retried.
+                Some(new_idempotency_key()),
             )
             .await?;
         Ok(())
@@ -413,7 +415,7 @@ impl Sandbox {
                 "POST",
                 &format!("/sandboxes/{}/pause", encode_uri_component(&self.id)),
                 None,
-                None,
+                Some(new_idempotency_key()),
             )
             .await?;
         self.close();

@@ -460,7 +460,62 @@
       "why": "a dropped connection (no response at all) is a network error: idempotent requests retry it"
     },
     {
-      "id": "pause-503-not-retried-without-idempotency-key",
+      "id": "resume-503-not-retried-without-idempotency-key",
+      "op": "sandbox.resume",
+      "input": {
+        "id": "pool-a:vm-7:org-42.sig"
+      },
+      "mock": [
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes",
+            "body": {
+              "template": "base"
+            }
+          },
+          "reply": {
+            "status": 201,
+            "body": {
+              "sandboxId": "pool-a:vm-7:org-42.sig",
+              "kind": "sandbox",
+              "state": "running",
+              "controlUrl": "$MOCK_WS/control/pool-a%3Avm-7%3Aorg-42.sig",
+              "expiresAt": "2030-01-01T00:00:00Z"
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/resume",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "idempotency-key": "<absent>"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 503,
+            "body": {
+              "error": "HTTP 503",
+              "retryable": true
+            }
+          }
+        }
+      ],
+      "expect": {
+        "error": {
+          "type": "no_capacity",
+          "status": 503
+        },
+        "requests": 2
+      },
+      "why": "a POST that carries no Idempotency-Key is not retry-safe: even a 503 with retryable:true is not retried (requests = the create + one resume)"
+    },
+    {
+      "id": "pause-503-pauseretryable-retried-with-the-same-key",
       "op": "sandbox.pause",
       "input": {
         "id": "pool-a:vm-7:org-42.sig"
@@ -492,27 +547,42 @@
             "headers": {
               "authorization": "Bearer conformance-test-key",
               "accept": "application/json",
-              "idempotency-key": "<absent>"
+              "idempotency-key": "<capture:key>"
             },
             "body": null
           },
           "reply": {
             "status": 503,
             "body": {
-              "error": "HTTP 503",
+              "error": "Sandbox pause did not finish; it is still running",
+              "code": "PauseRetryable",
               "retryable": true
+            }
+          }
+        },
+        {
+          "expect": {
+            "method": "POST",
+            "path": "/sandboxes/pool-a%3Avm-7%3Aorg-42.sig/pause",
+            "headers": {
+              "authorization": "Bearer conformance-test-key",
+              "accept": "application/json",
+              "idempotency-key": "<same:key>"
+            },
+            "body": null
+          },
+          "reply": {
+            "status": 200,
+            "body": {
+              "state": "paused"
             }
           }
         }
       ],
       "expect": {
-        "error": {
-          "type": "no_capacity",
-          "status": 503
-        },
-        "requests": 2
+        "requests": 3
       },
-      "why": "a POST that carries no Idempotency-Key is not retry-safe: even a 503 with retryable:true is not retried (requests = the create + one pause)"
+      "why": "pause is idempotent on the gateway, so it carries one Idempotency-Key; a 503 PauseRetryable (the host cut the pause short, the sandbox is still running) is retried with that same key"
     }
   ]
 }
