@@ -358,6 +358,28 @@ impl ControlChannel {
         self.state.fail_all("Control channel closed");
     }
 
+    /// Queue one JSON-RPC call on the socket RIGHT NOW and do not wait for the reply (which is dropped when it arrives: no one
+    /// is registered for it). Returns false when the channel is closed or not connected. It is synchronous on purpose: a
+    /// frame queued here is still flushed if `close()` follows at once (closing drops the sender, and the writer task sends
+    /// what is already queued before it hangs up), which a call made from a spawned task is not.
+    pub fn send_now(&self, method: &str, params: Value) -> bool {
+        let (id, writer) = {
+            let mut inner = self.state.inner.lock().unwrap();
+            if inner.closed {
+                return false;
+            }
+            let writer = match (&inner.writer, inner.ws_open) {
+                (Some(w), true) => w.clone(),
+                _ => return false,
+            };
+            let id = format!("n{}", inner.next_id);
+            inner.next_id += 1;
+            (id, writer)
+        };
+        let frame = serde_json::json!({ "id": id, "method": method, "params": params });
+        writer.send(Message::Text(format!("{frame}\n").into())).is_ok()
+    }
+
     /// Send one JSON-RPC call and await its correlated reply.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, SolariError> {
         let (id, rx, writer) = {
