@@ -103,8 +103,9 @@ fn normalize_error(e: &SolariError) -> Value {
         SolariError::SandboxNotStopped { status, code, .. } => ("not_stopped", Some(*status), code.clone()),
         SolariError::Gateway { status, code, .. } => ("gateway", Some(*status), code.clone()),
         SolariError::ExecInterrupted { status, code, .. } => ("gateway", Some(*status), code.clone()),
-        // The gateway answers a bad value 400 ValidationError; the SDK raises the same class before any request.
-        SolariError::Validation { .. } => ("validation", Some(400), Some("ValidationError".to_string())),
+        // The gateway answers a bad value 400 ValidationError; the SDK raises the same class (status 400, code ValidationError)
+        // before any request.
+        SolariError::Validation { status, code, .. } => ("validation", Some(*status), code.clone()),
         SolariError::Action { code, .. } => ("action", None, code.clone()),
         SolariError::Connection { .. } => ("connection", None, None),
         _ => ("other", None, None),

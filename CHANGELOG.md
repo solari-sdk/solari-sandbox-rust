@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+### Changed (breaking)
+- **A gateway 400 is `SolariError::Validation`, as in the TypeScript, Python and Go SDKs (`ValidationError`).** It was the generic `SolariError::Gateway { status: 400, .. }`, so a refused request (a bad field, a limit exceeded, the plan maximum) could not be matched by type. `Validation` now carries `status`, `message` and `code` (the gateway's code, e.g. `ValidationError`, `ExecTimeout`, `ExecFailed`), and `status()` returns it. The SDK's own refusals of caller input (a blank id in `connect`, a bad `user`) are the same variant with `status: 400` and `code: Some("ValidationError")`. Code that matched `SolariError::Gateway { status: 400, .. }` must match `SolariError::Validation { .. }`; a pattern `Validation { message }` needs `..`.
+
+### Fixed
+- **`pause()` retries a retryable `503 PauseRetryable` for up to two minutes, not ~5 s.** A pause takes 35-110 s on a loaded host, and a host that cuts it short answers a retryable 503. The transport gave up after its five retries, so a slow pause surfaced the 503. `Client::pause` and `Sandbox::pause` now keep retrying, with the same `Idempotency-Key`, for `PAUSE_RETRY_WINDOW` (120 s), as the TypeScript and Python SDKs do. New `HttpTransport::request_with_window`.
+
+### Tests
+- `error.rs`: 400 with code `ValidationError`, `ExecTimeout` or no code maps to `Validation`, keeping the status and code; 409 `ExecInterrupted` is in the code-first table. Red without the 400 mapping.
+- `tests/pause_retry.rs`: six `PauseRetryable` answers then 200 succeed, one key on every attempt, through `Client::pause` and through the handle's `pause`. Red with either call site on the ordinary retry budget. `pause_retry_window_is_two_minutes` pins 120 s; `retry_window_ends_with_the_last_503` (a 300 ms window through `HttpTransport::request_with_window`) retries more than the ordinary budget inside the window, then returns the last 503 `PauseRetryable` just after it. Red with the window at 5 s, and with a window that never ends. `PAUSE_RETRY_WINDOW` is exported.
+
 ## 0.5.3
 
 ### Fixed

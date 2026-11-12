@@ -43,7 +43,7 @@ pub use files::Files;
 pub use git::{
     Git, GitCloneOptions, GitCommitOptions, GitLogOptions, GitRemoteOptions, GitRunner,
 };
-pub use http::{new_idempotency_key, HttpOptions, HttpTransport};
+pub use http::{new_idempotency_key, HttpOptions, HttpTransport, PAUSE_RETRY_WINDOW};
 pub use types::{
     Chart, ChartAxis, ChartType, CodeResultItem, CommandResult, CreateSandboxRequest,
     CreateSandboxResponse, FsEntry, FsStat, GatewayErrorBody, GitBranch, GitCommit, GitStatus, GitStatusEntry,
