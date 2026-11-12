@@ -111,3 +111,35 @@ async fn handle_pause_retries_beyond_the_ordinary_retry_budget() {
     sb.pause().await.expect("the handle's pause keeps retrying within its window");
     assert_eq!(*posts.lock().unwrap(), 7, "six 503s then the 200");
 }
+
+/// The pause window is 120 s, as in TypeScript and Python (`PAUSE_RETRY_WINDOW_MS`).
+#[test]
+fn pause_retry_window_is_two_minutes() {
+    assert_eq!(solari::PAUSE_RETRY_WINDOW, std::time::Duration::from_secs(120));
+}
+
+/// The window bounds the retries: an answer that stays retryable is retried while the window is open (more than the ordinary
+/// budget of 5 retries) and then the last 503 reaches the caller. Window 300 ms, 20 ms between attempts.
+#[tokio::test]
+async fn retry_window_ends_with_the_last_503() {
+    let (port, seen) = mock(usize::MAX).await;
+    let mut o = solari::HttpOptions::new("slr_test_x", format!("http://127.0.0.1:{port}"));
+    o.retry_delay_ms = Some(20);
+    let t = solari::HttpTransport::new(o).expect("transport");
+    let start = std::time::Instant::now();
+    let call = t.request_with_window::<serde_json::Value>(
+        "POST",
+        "/sandboxes/sbx-1/pause",
+        None,
+        Some(solari::new_idempotency_key()),
+        Some(std::time::Duration::from_millis(300)),
+    );
+    let r = tokio::time::timeout(std::time::Duration::from_secs(5), call).await.expect("the window ends: no retrying past it");
+    let took = start.elapsed();
+    match r {
+        Err(solari::SolariError::Gateway { status: 503, code: Some(c), .. }) => assert_eq!(c, "PauseRetryable"),
+        other => panic!("want the last 503 PauseRetryable after the window, got {other:?}"),
+    }
+    assert!(took >= std::time::Duration::from_millis(300) && took < std::time::Duration::from_secs(3), "returned after {took:?}");
+    assert!(seen.lock().unwrap().len() > 6, "more attempts than the ordinary budget inside the window");
+}

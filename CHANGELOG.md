@@ -10,7 +10,7 @@
 
 ### Tests
 - `error.rs`: 400 with code `ValidationError`, `ExecTimeout` or no code maps to `Validation`, keeping the status and code; 409 `ExecInterrupted` is in the code-first table. Red without the 400 mapping.
-- `tests/pause_retry.rs`: six `PauseRetryable` answers then 200 succeed, one key on every attempt, through `Client::pause` and through the handle's `pause`. Red with either call site on the ordinary retry budget.
+- `tests/pause_retry.rs`: six `PauseRetryable` answers then 200 succeed, one key on every attempt, through `Client::pause` and through the handle's `pause`. Red with either call site on the ordinary retry budget. `pause_retry_window_is_two_minutes` pins 120 s; `retry_window_ends_with_the_last_503` (a 300 ms window through `HttpTransport::request_with_window`) retries more than the ordinary budget inside the window, then returns the last 503 `PauseRetryable` just after it. Red with the window at 5 s, and with a window that never ends. `PAUSE_RETRY_WINDOW` is exported.
 
 ## 0.5.3
 
