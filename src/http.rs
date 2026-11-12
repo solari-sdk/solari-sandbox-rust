@@ -7,7 +7,7 @@
 //! its session cap). Non-idempotent writes are never silently retried.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
 use serde::de::DeserializeOwned;
@@ -41,6 +41,10 @@ pub(crate) fn encode_uri_component(s: &str) -> String {
     }
     out
 }
+
+/// How long a pause is retried after a retryable 503 (`PauseRetryable`): a pause takes 35-110 s on a loaded host. Same window
+/// as the TypeScript and Python SDKs (`PAUSE_RETRY_WINDOW_MS`).
+pub const PAUSE_RETRY_WINDOW: Duration = Duration::from_secs(120);
 
 /// Options for constructing an [`HttpTransport`].
 #[derive(Debug, Clone)]
@@ -120,6 +124,26 @@ impl HttpTransport {
         body: Option<Value>,
         idempotency_key: Option<String>,
     ) -> Result<T, SolariError> {
+        self.request_with_window(method, path, body, idempotency_key, None).await
+    }
+
+    /// [`request`](Self::request), but a retryable failure is retried until `retry_window` has passed since the first attempt
+    /// instead of `max_retries` times (~5 s of backoff). For calls whose server side legitimately takes a while to settle: a
+    /// pause takes 35-110 s on a loaded host, and a host that cuts it short answers a retryable 503 `PauseRetryable`. Only an
+    /// idempotent request is retried at all. Mirrors `retryWindowMs` in `http.ts`.
+    pub async fn request_with_window<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        idempotency_key: Option<String>,
+        retry_window: Option<Duration>,
+    ) -> Result<T, SolariError> {
+        let started = Instant::now();
+        let may_retry = |attempt: u32| match retry_window {
+            Some(w) => started.elapsed() < w,
+            None => attempt < self.max_retries,
+        };
         let idempotent =
             method == "GET" || method == "DELETE" || idempotency_key.is_some();
         let m = Method::from_bytes(method.as_bytes())
@@ -148,7 +172,7 @@ impl HttpTransport {
             let resp = match rb.send().await {
                 Ok(r) => r,
                 Err(err) => {
-                    if idempotent && attempt < self.max_retries {
+                    if idempotent && may_retry(attempt) {
                         tokio::time::sleep(self.backoff(attempt)).await;
                         attempt += 1;
                         continue;
@@ -175,7 +199,7 @@ impl HttpTransport {
                 // error is not known-transient); 429 excluded as before.
                 let retryable = matches!(status, 502 | 503 | 504 | 507)
                     || err_body.as_ref().and_then(|b| b.retryable).unwrap_or(false);
-                if idempotent && retryable && attempt < self.max_retries {
+                if idempotent && retryable && may_retry(attempt) {
                     tokio::time::sleep(self.backoff(attempt)).await;
                     attempt += 1;
                     continue;

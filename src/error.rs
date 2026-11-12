@@ -72,16 +72,23 @@ pub enum SolariError {
     /// Anything else (bad response body, internal invariant).
     #[error("{0}")]
     Other(String),
-    /// A caller passed an invalid argument (e.g. a blank session id). Distinct
-    /// from `Other`: this is the caller's input to fix, not an unexpected
-    /// server response.
+    /// The request was refused as invalid: HTTP 400 from the gateway (a bad field, a limit exceeded; `code` says which, e.g.
+    /// `ValidationError`, `ExecTimeout`, `ExecFailed`), or the SDK refusing the caller's input before any request (a blank
+    /// sandbox id, a bad user name), which carries `status: 400` and `code: Some("ValidationError")` like the gateway's answer.
+    /// Distinct from `Other`: this is the caller's input to fix, not an unexpected server response. The same class the
+    /// TypeScript, Python and Go SDKs expose as `ValidationError`.
     #[error("{message}")]
-    Validation { message: String },
+    Validation { status: u16, message: String, code: Option<String> },
 }
 
 impl SolariError {
     pub(crate) fn connection(msg: impl Into<String>) -> Self {
         SolariError::Connection { message: msg.into() }
+    }
+
+    /// The SDK's own refusal of the caller's input, shaped like the gateway's `400 ValidationError`.
+    pub(crate) fn validation(msg: impl Into<String>) -> Self {
+        SolariError::Validation { status: 400, message: msg.into(), code: Some("ValidationError".to_string()) }
     }
 
     /// The gateway HTTP status this error carries, when it is a gateway error.
@@ -93,6 +100,7 @@ impl SolariError {
             | SolariError::NoCapacity { status, .. }
             | SolariError::SandboxNotStopped { status, .. }
             | SolariError::ExecInterrupted { status, .. }
+            | SolariError::Validation { status, .. }
             | SolariError::Gateway { status, .. } => Some(*status),
             _ => None,
         }
@@ -111,6 +119,7 @@ pub(crate) fn map_gateway_error(status: u16, body: Option<GatewayErrorBody>) -> 
     // `code` is the discriminator (PROTOCOL.md section 4); the status alone is not enough because one status carries
     // several meanings. A response with no code keeps the type its status has always had.
     match (status, code.as_deref()) {
+        (400, _) => SolariError::Validation { status, message, code },
         (401, _) => SolariError::Auth { status, message, code },
         (402, _) => SolariError::Plan { status, message, code },
         // The gateway's only JSON 403 is NotEntitled (the plan does not include sandboxes/desktops).
@@ -180,6 +189,8 @@ mod tests {
         Concurrency,
         NoCapacity,
         NotStopped,
+        Interrupted,
+        Validation,
         Plain,
     }
 
@@ -190,6 +201,8 @@ mod tests {
             SolariError::ConcurrencyLimit { .. } => Kind::Concurrency,
             SolariError::NoCapacity { .. } => Kind::NoCapacity,
             SolariError::SandboxNotStopped { .. } => Kind::NotStopped,
+            SolariError::ExecInterrupted { .. } => Kind::Interrupted,
+            SolariError::Validation { .. } => Kind::Validation,
             SolariError::Gateway { .. } => Kind::Plain,
             other => panic!("not a gateway error: {other:?}"),
         }
@@ -199,6 +212,9 @@ mod tests {
     #[test]
     fn maps_by_code_first() {
         let cases: &[(&str, u16, Option<&str>, Kind)] = &[
+            ("400-validation", 400, Some("ValidationError"), Kind::Validation),
+            ("400-exec-timeout", 400, Some("ExecTimeout"), Kind::Validation),
+            ("400-no-code", 400, None, Kind::Validation),
             ("401", 401, Some("Unauthorized"), Kind::Auth),
             ("402-plan", 402, Some("FeatureRequiresPlan"), Kind::Plan),
             ("402-credit", 402, Some("InsufficientCredit"), Kind::Plan),
@@ -207,6 +223,7 @@ mod tests {
             ("404", 404, Some("NotFound"), Kind::Plain),
             ("409-sandbox-stopped", 409, Some("SandboxStopped"), Kind::Plain),
             ("409-not-stopped", 409, Some("NotStopped"), Kind::NotStopped),
+            ("409-exec-interrupted", 409, Some("ExecInterrupted"), Kind::Interrupted),
             ("409-start-in-progress", 409, Some("StartInProgress"), Kind::NotStopped),
             ("409-host-capability-missing", 409, Some("HostCapabilityMissing"), Kind::Plain),
             ("409-snapshot-not-restorable", 409, Some("SnapshotNotRestorable"), Kind::Plain),
@@ -237,6 +254,8 @@ mod tests {
                 | SolariError::ConcurrencyLimit { code, .. }
                 | SolariError::NoCapacity { code, .. }
                 | SolariError::SandboxNotStopped { code, .. }
+                | SolariError::ExecInterrupted { code, .. }
+                | SolariError::Validation { code, .. }
                 | SolariError::Gateway { code, .. } => code.clone(),
                 _ => unreachable!(),
             };

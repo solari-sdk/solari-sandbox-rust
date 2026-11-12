@@ -13,7 +13,7 @@ use crate::commands::{run_command, Commands, RunOptions};
 use crate::error::SolariError;
 use crate::files::Files;
 use crate::git::{Git, GitRunner};
-use crate::http::{encode_uri_component, new_idempotency_key, HttpOptions, HttpTransport};
+use crate::http::{encode_uri_component, new_idempotency_key, HttpOptions, HttpTransport, PAUSE_RETRY_WINDOW};
 use crate::types::{
     CommandResult, CreateSandboxRequest, CreateSandboxResponse, Lifecycle, ResumeResponse, StartResponse,
     SandboxView, VolumeAttachment,
@@ -172,9 +172,7 @@ impl Client {
         // Guard B: the caller supplied this id, so a blank one is their input to
         // fix -> Validation (distinct from the response-side Other above).
         if sandbox_id.trim().is_empty() {
-            return Err(SolariError::Validation {
-                message: "Solari: connect() requires a non-blank sandbox id.".to_string(),
-            });
+            return Err(SolariError::validation("Solari: connect() requires a non-blank sandbox id."));
         }
         let view = self.get(sandbox_id).await?;
         let control_url = view.control_url.clone().unwrap_or_else(|| {
@@ -244,13 +242,15 @@ impl Client {
     pub async fn pause(&self, sandbox_id: &str) -> Result<(), SolariError> {
         let _: serde_json::Value = self
             .http
-            .request(
+            .request_with_window(
                 "POST",
                 &format!("/sandboxes/{}/pause", encode_uri_component(sandbox_id)),
                 None,
                 // Pause is idempotent on the gateway (an already-paused sandbox answers 200). The key is what makes the transport
-                // retry a POST at all, so a retryable 503 PauseRetryable (the host cut the pause short) is retried.
+                // retry a POST at all, so a retryable 503 PauseRetryable (the host cut the pause short) is retried, for up to
+                // PAUSE_RETRY_WINDOW: a pause takes 35-110 s on a loaded host.
                 Some(new_idempotency_key()),
+                Some(PAUSE_RETRY_WINDOW),
             )
             .await?;
         Ok(())
@@ -433,11 +433,12 @@ impl Sandbox {
     pub async fn pause(&self) -> Result<(), SolariError> {
         let _: serde_json::Value = self
             .http
-            .request(
+            .request_with_window(
                 "POST",
                 &format!("/sandboxes/{}/pause", encode_uri_component(&self.id)),
                 None,
                 Some(new_idempotency_key()),
+                Some(PAUSE_RETRY_WINDOW),
             )
             .await?;
         self.close();

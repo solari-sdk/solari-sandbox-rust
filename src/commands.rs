@@ -517,7 +517,7 @@ fn validate_user(user: Option<&str>) -> Result<(), SolariError> {
     if ok {
         Ok(())
     } else {
-        Err(SolariError::Validation { message: "user: must be a unix user name or root".into() })
+        Err(SolariError::validation("user: must be a unix user name or root"))
     }
 }
 
@@ -555,9 +555,9 @@ async fn exec_oneshot(
 fn exec_outcome(r: Result<CommandResult, SolariError>) -> Result<CommandResult, SolariError> {
     let timed_out = || CommandResult::from_text(-1, String::new(), String::new(), true);
     match r {
-        Err(SolariError::Gateway { status: 400, code: Some(c), .. }) if c == "ExecTimeout" => Ok(timed_out()),
+        Err(SolariError::Validation { status: 400, code: Some(c), .. }) if c == "ExecTimeout" => Ok(timed_out()),
         Err(SolariError::Gateway { status: 502, message, .. }) if message.contains("i/o timeout") => Ok(timed_out()),
-        Err(SolariError::Gateway { status: 400, code: Some(c), message }) if c == "ExecFailed" => {
+        Err(SolariError::Validation { status: 400, code: Some(c), message }) if c == "ExecFailed" => {
             Err(SolariError::Action { method: "cmd.start".into(), message, code: Some(c) })
         }
         Ok(mut r) => {

@@ -22,7 +22,7 @@ not `solari-sdk` (the `[package] name` in `Cargo.toml`).
 
 ```toml
 [dependencies]
-solari-sandbox = "0.3"
+solari-sandbox = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
