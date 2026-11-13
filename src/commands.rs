@@ -25,6 +25,8 @@ pub struct RunOptions {
     pub cwd: Option<String>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub user: Option<String>,
+    /// The command's deadline. At most 600000 (the gateway's cap): a larger value is refused with `SolariError::Validation`
+    /// before anything is sent.
     pub timeout_ms: Option<u64>,
     /// Run detached: returns immediately, output still streams via callbacks.
     pub background: bool,
@@ -441,6 +443,7 @@ pub(crate) async fn run_command(
     // Validated BEFORE a transport is chosen, with the gateway's own wording, so a bad value fails the same way whether the
     // command would have gone over `/exec` (which answers 400 ValidationError) or the live connection (which accepts anything).
     validate_user(opts.user.as_deref())?;
+    validate_timeout(opts.timeout_ms)?;
     // One-shot HTTP fast path: a plain run-to-completion (no streaming
     // callbacks, not backgrounded, no per-command env/user) over the warm REST
     // connection, when the control channel isn't already open. A shared sandbox
@@ -505,6 +508,18 @@ pub(crate) async fn run_command(
 }
 
 /// `user` must be `root` or a unix user name; the gateway's `/exec` route answers 400 ValidationError otherwise.
+/// The gateway's per-tier command deadline cap (`timeoutMs` is at most 600000 on `/exec` and on the live connection).
+const MAX_COMMAND_TIMEOUT_MS: u64 = 600_000;
+
+/// `timeout_ms` above the cap is refused before any transport, with the gateway's wording: the live connection used to accept
+/// any value while `/exec` answered 400, so the same `run` failed or succeeded depending on the route it took.
+fn validate_timeout(timeout_ms: Option<u64>) -> Result<(), SolariError> {
+    match timeout_ms {
+        Some(t) if t > MAX_COMMAND_TIMEOUT_MS => Err(SolariError::validation(format!("timeoutMs must be at most {MAX_COMMAND_TIMEOUT_MS}"))),
+        _ => Ok(()),
+    }
+}
+
 fn validate_user(user: Option<&str>) -> Result<(), SolariError> {
     let Some(u) = user else { return Ok(()) };
     let ok = u == "root" || {

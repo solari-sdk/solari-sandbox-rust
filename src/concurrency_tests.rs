@@ -13,6 +13,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::client::Sandbox;
 use crate::commands::RunOptions;
 use crate::http::{HttpOptions, HttpTransport};
+use crate::error::SolariError;
 use crate::types::CreateSandboxResponse;
 
 type Calls = Arc<Mutex<Vec<(String, Value)>>>;
@@ -618,4 +619,60 @@ async fn a_streaming_run_on_a_shared_sandbox_reports_the_refusal() {
     let err = sbx.commands().run("sh", opts).await.unwrap_err();
     assert!(crate::error::is_shared_refusal(&err), "got {err}");
     assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+// ---- timeout_ms above the 600000 cap is refused before any transport ------------------------------------------------
+
+fn start_ok() -> Handler {
+    Arc::new(|method, _| match method {
+        "cmd.start" => vec![reply(json!({"cmdId": "c1"})), json!({"type": "cmd.exit", "cmdId": "c1", "exitCode": 0})],
+        _ => vec![reply(json!({"ok": true}))],
+    })
+}
+
+fn assert_timeout_refused(r: Result<crate::types::CommandResult, SolariError>) {
+    match r {
+        Err(SolariError::Validation { status, message, code }) => {
+            assert_eq!(status, 400);
+            assert_eq!(message, "timeoutMs must be at most 600000");
+            assert_eq!(code.as_deref(), Some("ValidationError"));
+        }
+        other => panic!("expected SolariError::Validation, got {other:?}"),
+    }
+}
+
+/// With `env` set the command goes over the live connection, which used to accept any deadline (`/exec` answered 400).
+#[tokio::test]
+async fn run_refuses_a_timeout_over_the_cap_on_the_live_connection() {
+    let gw = gateway(start_ok()).await;
+    let sbx = sandbox(&gw);
+    let mut opts = RunOptions::new();
+    opts.timeout_ms = Some(700_000);
+    opts.env = Some([("A".to_string(), "1".to_string())].into_iter().collect());
+    assert_timeout_refused(sbx.commands().run("true", opts).await);
+    assert!(methods(&gw.calls).is_empty(), "nothing may reach the gateway: {:?}", methods(&gw.calls));
+}
+
+/// A plain run takes `/exec` first: 600001 is refused before that request too (no HTTP, no fallback to cmd.start).
+#[tokio::test]
+async fn run_refuses_one_ms_over_the_cap_on_the_plain_path() {
+    let gw = gateway(start_ok()).await;
+    let sbx = sandbox(&gw);
+    let mut opts = RunOptions::new();
+    opts.timeout_ms = Some(600_001);
+    assert_timeout_refused(sbx.commands().run("true", opts).await);
+    assert!(methods(&gw.calls).is_empty(), "nothing may reach the gateway: {:?}", methods(&gw.calls));
+}
+
+/// The cap itself is allowed, and passed through as the command's deadline.
+#[tokio::test]
+async fn run_accepts_a_timeout_at_the_cap() {
+    let gw = gateway(start_ok()).await;
+    let sbx = sandbox(&gw);
+    let mut opts = RunOptions::new();
+    opts.timeout_ms = Some(600_000);
+    opts.env = Some([("A".to_string(), "1".to_string())].into_iter().collect());
+    let r = sbx.commands().run("true", opts).await.unwrap();
+    assert_eq!(r.exit_code, 0);
+    assert_eq!(methods(&gw.calls), vec!["cmd.start".to_string()]);
 }
