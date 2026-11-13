@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`commands().run` refuses `timeout_ms` above 600000 before sending anything, on every route.** The gateway caps a command's deadline at 600000 ms. `/exec` answered a larger value with 400, but the live connection (used when `env`, `user`, a callback or `background` is set, or when the socket is already open) ran the command with it, so the same call failed or succeeded depending on the route. It is now `SolariError::Validation` (`status: 400`, `code: Some("ValidationError")`, message `timeoutMs must be at most 600000`) with nothing sent, as in the TypeScript, Python and Go SDKs. 600000 itself is allowed; `None` and `start()` are unchanged. Retest C-08.
+
+### Tests
+- `concurrency_tests.rs`: 700000 with `env` (the live connection) and 600001 on the plain path are both refused with that error and no call reaches the gateway; 600000 runs over `cmd.start`. Red without the check: the live-connection run succeeded with 700000, and the plain path sent `POST /exec`.
+
 ## 0.6.0
 
 ### Changed (breaking)
