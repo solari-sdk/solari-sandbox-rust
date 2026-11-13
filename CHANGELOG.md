@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 ### Fixed
 - **`commands().run` refuses `timeout_ms` above 600000 before sending anything, on every route.** The gateway caps a command's deadline at 600000 ms. `/exec` answered a larger value with 400, but the live connection (used when `env`, `user`, a callback or `background` is set, or when the socket is already open) ran the command with it, so the same call failed or succeeded depending on the route. It is now `SolariError::Validation` (`status: 400`, `code: Some("ValidationError")`, message `timeoutMs must be at most 600000`) with nothing sent, as in the TypeScript, Python and Go SDKs. 600000 itself is allowed; `None` and `start()` are unchanged. Retest C-08.
 
+- **`commands().run` with `timeout_ms: Some(0)` (no deadline), or under 1000, runs over the live connection on a plain run.** It used to go to `POST /exec`, which takes 1000 to 600000 and answered `400 "timeoutMs must be at least 1000 (one second)"`, while the same call with `env` ran with no deadline (confirmed on staging 2026-11-13). As in the TypeScript and Python SDKs, a deadline `/exec` cannot express now takes the live connection.
+
 ### Tests
-- `concurrency_tests.rs`: 700000 with `env` (the live connection) and 600001 on the plain path are both refused with that error and no call reaches the gateway; 600000 runs over `cmd.start`. Red without the check: the live-connection run succeeded with 700000, and the plain path sent `POST /exec`.
+- `concurrency_tests.rs`: 700000 with `env` (the live connection) and 600001 on the plain path are both refused with that error and no call reaches the gateway; 600000 runs over `cmd.start`. `run_with_no_deadline_or_under_a_second_uses_the_live_connection`: `Some(0)` and `Some(500)` on a plain run go over `cmd.start`; red without the routing change (the run sent `POST /exec`). Red without the check: the live-connection run succeeded with 700000, and the plain path sent `POST /exec`.
 
 ## 0.6.0
 

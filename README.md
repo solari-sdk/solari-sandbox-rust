@@ -113,6 +113,13 @@ async fn main() -> Result<(), solari::SolariError> {
 }
 ```
 
+## Command deadline
+
+`RunOptions::timeout_ms` is the command's deadline on every route, at most 600000 (10 minutes). `Some(0)` means no
+deadline, and so does `None` on the live connection (a plain run without one takes `/exec`, which applies 600000). From
+0.6.1 a larger value is `SolariError::Validation` "timeoutMs must be at most 600000" before anything is sent, and `0` or a
+deadline under a second runs over the live connection instead of failing on `/exec`.
+
 ## Errors
 
 Every fallible method returns `Result<T, SolariError>`. Variants mirror the
