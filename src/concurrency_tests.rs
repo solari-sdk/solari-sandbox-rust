@@ -664,6 +664,21 @@ async fn run_refuses_one_ms_over_the_cap_on_the_plain_path() {
     assert!(methods(&gw.calls).is_empty(), "nothing may reach the gateway: {:?}", methods(&gw.calls));
 }
 
+/// `0` (no deadline) and a deadline under a second cannot be expressed on `/exec` (it answers 400 below 1000), so a plain run
+/// with one goes over the live connection, as in the TypeScript and Python SDKs. It used to send `POST /exec` and fail.
+#[tokio::test]
+async fn run_with_no_deadline_or_under_a_second_uses_the_live_connection() {
+    for t in [0u64, 500] {
+        let gw = gateway(start_ok()).await;
+        let sbx = sandbox(&gw);
+        let mut opts = RunOptions::new();
+        opts.timeout_ms = Some(t);
+        let r = sbx.commands().run("true", opts).await.unwrap_or_else(|e| panic!("timeout_ms {t}: {e:?}"));
+        assert_eq!(r.exit_code, 0, "timeout_ms {t}");
+        assert_eq!(methods(&gw.calls), vec!["cmd.start".to_string()], "timeout_ms {t}");
+    }
+}
+
 /// The cap itself is allowed, and passed through as the command's deadline.
 #[tokio::test]
 async fn run_accepts_a_timeout_at_the_cap() {

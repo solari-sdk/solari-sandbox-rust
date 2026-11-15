@@ -449,11 +449,14 @@ pub(crate) async fn run_command(
     // connection, when the control channel isn't already open. A shared sandbox
     // refuses command streams but runs commands over REST, so once we know the
     // sandbox is shared the REST route is the only one that works, connected or not.
+    // `/exec` takes 1000..=600000 only: `0` (no deadline) and anything under a second go over the live connection, where the
+    // deadline is this SDK's own timer, as in the TypeScript and Python SDKs. `/exec` used to answer them 400.
     let rest_eligible = !opts.background
         && opts.on_stdout.is_none()
         && opts.on_stderr.is_none()
         && opts.env.is_none()
-        && opts.user.is_none();
+        && opts.user.is_none()
+        && opts.timeout_ms.map_or(true, |t| t >= MIN_REST_TIMEOUT_MS);
     if rest_eligible && (!sb.channel().connected() || sb.is_shared()) {
         match exec_oneshot(sb, cmd, opts).await {
             Ok(r) => return Ok(r),
@@ -508,6 +511,9 @@ pub(crate) async fn run_command(
 }
 
 /// `user` must be `root` or a unix user name; the gateway's `/exec` route answers 400 ValidationError otherwise.
+/// The shortest `timeoutMs` `POST /exec` accepts; a shorter deadline (or `0`, none) runs on the live connection.
+const MIN_REST_TIMEOUT_MS: u64 = 1000;
+
 /// The gateway's per-tier command deadline cap (`timeoutMs` is at most 600000 on `/exec` and on the live connection).
 const MAX_COMMAND_TIMEOUT_MS: u64 = 600_000;
 
