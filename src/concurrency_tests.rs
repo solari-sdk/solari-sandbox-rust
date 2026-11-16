@@ -691,3 +691,80 @@ async fn run_accepts_a_timeout_at_the_cap() {
     assert_eq!(r.exit_code, 0);
     assert_eq!(methods(&gw.calls), vec!["cmd.start".to_string()]);
 }
+
+// ---- retest 2026-11-16 (R4): aborting a one-shot /exec only stops the command if the request carries X-Solari-Stream: 1 ----
+
+/// A one-route HTTP gateway that answers every request with `body` (HTTP 200) and records each request head, lower-cased.
+async fn exec_stub(body: &'static str) -> (u16, Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let heads: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let heads2 = heads.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = listener.accept().await else { return };
+            let heads = heads2.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let Ok(n) = s.read(&mut buf).await else { return };
+                heads.lock().unwrap().push(String::from_utf8_lossy(&buf[..n]).to_lowercase());
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    (port, heads)
+}
+
+fn unconnected_sandbox(http_port: u16) -> Sandbox {
+    let resp = CreateSandboxResponse {
+        sandbox_id: "sb".into(),
+        kind: "sandbox".into(),
+        control_url: "ws://127.0.0.1:1/control/sb".into(),
+        expires_at: "".into(),
+        stream_url: None,
+        recording_url: None,
+    };
+    Sandbox::from_response(
+        Arc::new(HttpTransport::new(HttpOptions::new("k", format!("http://127.0.0.1:{http_port}"))).unwrap()),
+        resp,
+        Some(2000),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_one_shot_exec_sends_the_stream_header() {
+    let (port, heads) = exec_stub(r#"{"exitCode":0,"stdout":"hi","stderr":""}"#).await;
+    unconnected_sandbox(port).commands().run("echo", RunOptions::new()).await.unwrap();
+    let heads = heads.lock().unwrap().clone();
+    assert_eq!(heads.len(), 1);
+    assert!(heads[0].contains("x-solari-stream: 1\r\n"), "no X-Solari-Stream header: {}", heads[0]);
+}
+
+#[tokio::test]
+async fn a_streamed_answer_is_unwrapped_into_the_result() {
+    let (port, _) = exec_stub("\n\n\n{\"exitCode\":3,\"stdout\":\"out\",\"stderr\":\"err\",\"httpStatus\":200}").await;
+    let r = unconnected_sandbox(port).commands().run("sh", RunOptions::new()).await.unwrap();
+    assert_eq!((r.exit_code, r.stdout.as_str(), r.stderr.as_str()), (3, "out", "err"));
+}
+
+#[tokio::test]
+async fn a_streamed_error_status_becomes_the_error() {
+    let (port, _) = exec_stub("\n{\"code\":\"ExecInterrupted\",\"error\":\"parked\",\"retryable\":false,\"httpStatus\":409}").await;
+    let err = unconnected_sandbox(port).commands().run("sh", RunOptions::new()).await.unwrap_err();
+    let text = format!("{err:?}");
+    assert!(text.contains("409") && text.contains("ExecInterrupted"), "the real status was lost: {text}");
+}
+
+#[tokio::test]
+async fn a_streamed_exec_timeout_is_still_the_elapsed_deadline_result() {
+    let (port, _) = exec_stub("\n{\"code\":\"ExecTimeout\",\"error\":\"deadline\",\"httpStatus\":400}").await;
+    let r = unconnected_sandbox(port).commands().run("sleep", RunOptions::new()).await.unwrap();
+    assert!(r.timed_out, "a 400 ExecTimeout inside a streamed answer must become a timed-out result");
+}

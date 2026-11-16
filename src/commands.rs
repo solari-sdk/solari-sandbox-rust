@@ -565,7 +565,7 @@ async fn exec_oneshot(
         body.insert("timeoutMs".into(), Value::from(t));
     }
     let path = format!("/sandboxes/{}/exec", encode_uri_component(sb.id()));
-    let r = sb.http().request::<CommandResult>("POST", &path, Some(Value::Object(body)), None).await;
+    let r = sb.http().request_streamed::<CommandResult>("POST", &path, Some(Value::Object(body)), None).await;
     exec_outcome(r)
 }
 
