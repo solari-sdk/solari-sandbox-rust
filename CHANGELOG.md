@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+### Fixed
+- **Aborting a one-shot `/exec` now stops the command.** The one-shot `POST /sandboxes/:id/exec` sends `X-Solari-Stream: 1`. Through the load balancer an HTTP/1.1 client's disconnect only reaches the gateway once the gateway has started its response, and a plain `/exec` sends nothing until the command ends, so a dropped future or a killed process left the command running (retest 2026-11-16, R4; the Go and TypeScript SDKs already send the header). The gateway then answers HTTP 200 with keep-alive newlines first and the real status in `httpStatus`, which the SDK unwraps into the normal result or error (a streamed 400 `ExecTimeout` is still the elapsed-deadline result). A gateway that does not know the header answers as before. New `HttpTransport::request_streamed`.
+
+### Tests
+- `concurrency_tests.rs`: `a_one_shot_exec_sends_the_stream_header` (red without the header), `a_streamed_answer_is_unwrapped_into_the_result`, `a_streamed_error_status_becomes_the_error` (the real status 409 `ExecInterrupted` is kept; red without the unwrap), `a_streamed_exec_timeout_is_still_the_elapsed_deadline_result` (red without the unwrap).
+
 ## 0.6.1
 
 ### Fixed

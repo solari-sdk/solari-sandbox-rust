@@ -139,6 +139,33 @@ impl HttpTransport {
         idempotency_key: Option<String>,
         retry_window: Option<Duration>,
     ) -> Result<T, SolariError> {
+        self.request_inner(method, path, body, idempotency_key, retry_window, false).await
+    }
+
+    /// [`request`](Self::request) with `X-Solari-Stream: 1` (POST `/sandboxes/:id/exec`). The gateway then starts its response early,
+    /// so a dropped connection (this future being dropped, a killed process) reaches it through the load balancer and it stops the
+    /// command; without the header a plain `/exec` abort is never heard (HTTP/1.1 behind the LB). A streamed answer is HTTP 200
+    /// whatever happened, with leading keep-alive newlines and the real status in `httpStatus`, which is unwrapped here into the
+    /// normal result or error. A gateway that ignores the header answers as before.
+    pub async fn request_streamed<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        idempotency_key: Option<String>,
+    ) -> Result<T, SolariError> {
+        self.request_inner(method, path, body, idempotency_key, None, true).await
+    }
+
+    async fn request_inner<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        idempotency_key: Option<String>,
+        retry_window: Option<Duration>,
+        stream: bool,
+    ) -> Result<T, SolariError> {
         let started = Instant::now();
         let may_retry = |attempt: u32| match retry_window {
             Some(w) => started.elapsed() < w,
@@ -160,6 +187,9 @@ impl HttpTransport {
                 .header("Accept", "application/json");
             if let Some(k) = &idempotency_key {
                 rb = rb.header("Idempotency-Key", k);
+            }
+            if stream {
+                rb = rb.header("X-Solari-Stream", "1");
             }
             if let Some(b) = &body_str {
                 rb = rb.header("Content-Type", "application/json").body(b.clone());
@@ -207,8 +237,21 @@ impl HttpTransport {
                 return Err(map_gateway_error(status, err_body));
             }
 
-            let text = resp.text().await.unwrap_or_default();
-            if text.is_empty() {
+            let mut text = resp.text().await.unwrap_or_default();
+            if stream {
+                // A streamed answer: keep-alive newlines, then the result with the real status in "httpStatus".
+                if let Ok(Value::Object(mut obj)) = serde_json::from_str::<Value>(text.trim()) {
+                    if let Some(hs) = obj.remove("httpStatus").and_then(|v| v.as_u64()) {
+                        let inner = Value::Object(obj);
+                        if hs >= 400 {
+                            let err_body: Option<GatewayErrorBody> = serde_json::from_value(inner).ok();
+                            return Err(map_gateway_error(hs as u16, err_body));
+                        }
+                        text = inner.to_string();
+                    }
+                }
+            }
+            if text.trim().is_empty() {
                 return serde_json::from_str("null")
                     .map_err(|e| SolariError::Other(format!("empty body decode: {e}")));
             }
